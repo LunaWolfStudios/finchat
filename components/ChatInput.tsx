@@ -7,14 +7,19 @@ interface ChatInputProps {
   onSendMessage: (content: string, type: MessageType, file?: File) => void;
   replyTo: Message | null;
   onCancelReply: () => void;
-  allUsers: User[]; // Changed from onlineUsers
+  allUsers: User[]; 
+}
+
+interface PreviewItem {
+  id: string;
+  file: File;
+  url: string;
+  type: MessageType;
 }
 
 export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, allUsers = [] }) => {
   const [text, setText] = useState('');
-  const [preview, setPreview] = useState<string | null>(null); // Holds DataURL or Text Content
-  const [fileType, setFileType] = useState<MessageType>('text');
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [previews, setPreviews] = useState<PreviewItem[]>([]);
   
   // Drag State
   const [isDragging, setIsDragging] = useState(false);
@@ -34,49 +39,70 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
   }, [replyTo]);
 
   // --- File Processing Logic ---
-  const processFile = (file: File) => {
-    if (file.size > MAX_FILE_SIZE_BYTES) {
-      alert(`File too large. Max size is ${MAX_FILE_SIZE_BYTES / 1024 / 1024}MB`);
+  const processFiles = async (fileList: FileList | File[]) => {
+    const files = Array.from(fileList);
+    
+    if (previews.length + files.length > 100) {
+      alert("You can only upload up to 100 files at a time.");
       return;
     }
 
-    let type: MessageType = 'file';
-    if (file.type.startsWith('image/')) type = 'image';
-    else if (file.type.startsWith('video/')) type = 'video';
-    else if (file.type.startsWith('audio/')) type = 'audio';
-    
-    // Check for Text Files to preview content
-    // Common text mime types or extensions
-    const isText = file.type.startsWith('text/') || 
-                   file.type === 'application/json' ||
-                   file.name.match(/\.(txt|md|csv|json|js|ts|tsx|jsx|html|css|py|java|c|cpp|h|xml|log)$/i);
+    const newPreviews: PreviewItem[] = [];
+    const promises = files.map(file => new Promise<void>(resolve => {
+        if (file.size > MAX_FILE_SIZE_BYTES) {
+            console.warn(`File ${file.name} too large.`);
+            resolve();
+            return;
+        }
 
-    setSelectedFile(file);
-    setFileType(type);
+        let type: MessageType = 'file';
+        if (file.type.startsWith('image/')) type = 'image';
+        else if (file.type.startsWith('video/')) type = 'video';
+        else if (file.type.startsWith('audio/')) type = 'audio';
+        
+        const isText = file.type.startsWith('text/') || 
+                       file.type === 'application/json' ||
+                       file.name.match(/\.(txt|md|csv|json|js|ts|tsx|jsx|html|css|py|java|c|cpp|h|xml|log)$/i);
 
-    const reader = new FileReader();
+        const reader = new FileReader();
 
-    if (isText) {
-       // Read as text for preview
-       reader.onload = (e) => {
-         // Limit preview to ~2000 chars to avoid UI lag
-         const result = e.target?.result as string;
-         setPreview(result.slice(0, 2000) + (result.length > 2000 ? '...\n(Preview Truncated)' : ''));
-       };
-       reader.readAsText(file);
-    } else {
-       // Read as DataURL for media or just to have a reference
-       reader.onload = (e) => {
-         setPreview(e.target?.result as string);
-       };
-       reader.readAsDataURL(file);
-    }
+        const onRead = (result: string) => {
+             newPreviews.push({
+                 id: Math.random().toString(36).substring(7) + Date.now(),
+                 file,
+                 url: result,
+                 type
+             });
+             resolve();
+        };
+
+        if (isText) {
+           reader.onload = (e) => {
+             const res = e.target?.result as string;
+             // Truncate text preview to prevent massive memory usage in state
+             onRead(res.slice(0, 2000) + (res.length > 2000 ? '...\n(Preview Truncated)' : ''));
+           };
+           reader.readAsText(file);
+        } else {
+           reader.onload = (e) => onRead(e.target?.result as string);
+           reader.readAsDataURL(file);
+        }
+    }));
+
+    await Promise.all(promises);
+    setPreviews(prev => [...prev, ...newPreviews]);
   };
 
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    processFile(file);
+    if (e.target.files && e.target.files.length > 0) {
+        processFiles(e.target.files);
+    }
+    // Reset so the same file can be selected again if needed
+    e.target.value = '';
+  };
+
+  const removePreview = (id: string) => {
+      setPreviews(prev => prev.filter(p => p.id !== id));
   };
 
   // --- Drag & Drop Handlers ---
@@ -89,8 +115,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
   const handleDragLeave = (e: React.DragEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    
-    // Only set false if leaving the main container (not entering a child)
     if (e.currentTarget.contains(e.relatedTarget as Node)) return;
     setIsDragging(false);
   };
@@ -102,27 +126,28 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
 
     const files = e.dataTransfer.files;
     if (files && files.length > 0) {
-      processFile(files[0]);
+      processFiles(files);
     }
   };
 
   // --- Send Logic ---
   const handleSend = () => {
-    if ((!text.trim() && !selectedFile) || (fileType !== 'text' && !preview)) return;
+    if (!text.trim() && previews.length === 0) return;
 
-    if (selectedFile && preview) {
-      // If it's a file type message, we send the preview (which might be DataURL) or handled by service
-      // Service logic: if `file` is present, it uploads. `content` is fallback or URL.
-      onSendMessage(selectedFile.name, fileType, selectedFile);
-    } else {
-      onSendMessage(text, 'text');
+    // 1. Send text message if it exists
+    if (text.trim()) {
+       // If there are files, the text acts as a separate message (caption logic style)
+       onSendMessage(text, 'text');
     }
+
+    // 2. Send all files as separate messages
+    previews.forEach(item => {
+        onSendMessage(item.url, item.type, item.file);
+    });
 
     // Reset
     setText('');
-    setPreview(null);
-    setFileType('text');
-    setSelectedFile(null);
+    setPreviews([]);
     setMentionQuery(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     onCancelReply();
@@ -212,56 +237,46 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
         </div>
       )}
 
-      {/* File Preview Area */}
-      {preview && selectedFile && (
-        <div className="relative mb-3 animate-slide-up">
-           <button 
-              onClick={() => { setPreview(null); setSelectedFile(null); setFileType('text'); }}
-              className="absolute -top-2 -right-2 z-10 bg-red-500 text-white rounded-full p-1 shadow-md hover:bg-red-600 border border-white dark:border-gray-900"
-            >
-              <X size={12} />
-            </button>
+      {/* File Previews Area (Horizontal Scroll) */}
+      {previews.length > 0 && (
+        <div className="flex space-x-2 overflow-x-auto pb-3 mb-1 custom-scrollbar animate-slide-up">
+           {previews.map(item => (
+              <div key={item.id} className="relative flex-shrink-0 w-24 group/item">
+                 <button 
+                    onClick={() => removePreview(item.id)}
+                    className="absolute -top-1 -right-1 z-10 bg-red-500 text-white rounded-full p-0.5 shadow-md hover:bg-red-600 border border-white dark:border-gray-900 opacity-0 group-hover/item:opacity-100 transition-opacity"
+                  >
+                    <X size={10} />
+                  </button>
 
-          {/* Media Previews */}
-          {fileType === 'image' && (
-             <div className="relative inline-block border border-neon-cyan/30 rounded-lg overflow-hidden bg-black/20">
-                <img src={preview} alt="preview" className="h-32 w-auto object-contain" />
-                <div className="absolute bottom-0 w-full bg-black/60 text-white text-[10px] p-1 truncate">{selectedFile.name}</div>
-             </div>
-          )}
-          {fileType === 'video' && (
-             <div className="relative inline-block border border-neon-cyan/30 rounded-lg overflow-hidden bg-black/20">
-                 <video src={preview} className="h-32 w-auto" />
-                 <div className="absolute bottom-0 w-full bg-black/60 text-white text-[10px] p-1 truncate">{selectedFile.name}</div>
-             </div>
-          )}
-          {fileType === 'audio' && (
-             <div className="inline-flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg border border-neon-cyan/50">
-                <Mic size={24} className="text-neon-cyan mr-3" />
-                <div className="flex flex-col">
-                   <span className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate max-w-[150px]">{selectedFile.name}</span>
-                   <span className="text-[10px] text-gray-500">Audio File</span>
-                </div>
-             </div>
-          )}
-
-          {/* Generic & Text File Preview */}
-          {fileType === 'file' && (
-            <div className="flex flex-col max-h-48 w-full max-w-lg">
-                <div className="flex items-center p-2 bg-gray-100 dark:bg-gray-800 rounded-t-lg border border-gray-300 dark:border-gray-700">
-                    <FileGeneric size={20} className="text-neon-purple mr-2" />
-                    <span className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">{selectedFile.name}</span>
-                    <span className="ml-auto text-[10px] text-gray-500">{(selectedFile.size / 1024).toFixed(1)} KB</span>
-                </div>
-                {/* Text Content Reader */}
-                <div className="bg-gray-50 dark:bg-black/40 p-3 rounded-b-lg border-x border-b border-gray-300 dark:border-gray-700 overflow-y-auto max-h-32 custom-scrollbar">
-                   <pre className="text-[10px] font-mono text-gray-600 dark:text-gray-400 whitespace-pre-wrap break-words">
-                      {/* Check if preview looks like Data URL (binary) or text */}
-                      {preview.startsWith('data:') ? '(Binary File - No Text Preview)' : preview}
-                   </pre>
-                </div>
-            </div>
-          )}
+                  <div className="rounded-lg overflow-hidden border border-gray-300 dark:border-gray-700 bg-gray-50 dark:bg-black/20 h-24 w-24 flex items-center justify-center relative">
+                      {item.type === 'image' && (
+                          <img src={item.url} alt="preview" className="h-full w-full object-cover" />
+                      )}
+                      {item.type === 'video' && (
+                          <video src={item.url} className="h-full w-full object-cover" />
+                      )}
+                      {item.type === 'audio' && (
+                          <div className="flex flex-col items-center justify-center p-1 text-center">
+                             <Mic size={20} className="text-neon-cyan mb-1" />
+                             <span className="text-[8px] text-gray-500 truncate w-full">{item.file.name}</span>
+                          </div>
+                      )}
+                      {item.type === 'file' && (
+                          <div className="flex flex-col items-center justify-center p-1 text-center">
+                             <FileGeneric size={20} className="text-neon-purple mb-1" />
+                             <span className="text-[8px] text-gray-500 truncate w-full">{item.file.name}</span>
+                          </div>
+                      )}
+                      {/* Overlay name for images/videos */}
+                      {(item.type === 'image' || item.type === 'video') && (
+                          <div className="absolute bottom-0 inset-x-0 bg-black/60 p-0.5">
+                             <p className="text-[8px] text-white truncate text-center">{item.file.name}</p>
+                          </div>
+                      )}
+                  </div>
+              </div>
+           ))}
         </div>
       )}
 
@@ -275,12 +290,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
           <Paperclip size={20} />
         </button>
         
-        {/* Accept * to allow all files */}
+        {/* Input accepts multiple files */}
         <input 
           type="file" 
           ref={fileInputRef} 
           className="hidden" 
           onChange={handleFileSelect}
+          multiple
         />
 
         <div className="flex-1 bg-gray-100 dark:bg-gray-800 rounded-2xl flex items-center border border-transparent transition-all">
@@ -289,7 +305,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
             value={text}
             onChange={handleTextChange}
             onKeyDown={handleKeyDown}
-            placeholder={selectedFile ? "Add a caption (optional)..." : "Type a message..."}
+            placeholder={previews.length > 0 ? "Add a caption / message..." : "Type a message..."}
             className="w-full bg-transparent border-none focus:ring-0 p-3 max-h-32 resize-none text-gray-900 dark:text-gray-100 placeholder-gray-500"
             rows={1}
             style={{ minHeight: '44px' }}
@@ -298,7 +314,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
 
         <button 
           onClick={handleSend}
-          disabled={!text.trim() && !selectedFile}
+          disabled={!text.trim() && previews.length === 0}
           className="p-3 bg-neon-cyan/20 text-neon-cyan rounded-full hover:bg-neon-cyan hover:text-black transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-[0_0_10px_rgba(0,255,255,0.2)] flex-shrink-0"
         >
           <Send size={20} />
