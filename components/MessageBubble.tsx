@@ -12,6 +12,7 @@ interface MessageBubbleProps {
   scrollToMessage: (id: string) => void;
   currentUser: User | null;
   getReplySnippet?: (id: string) => string;
+  authorUser?: User; // New prop for avatar
 }
 
 // --- Rich Text Parser Components ---
@@ -273,7 +274,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onDelete,
   scrollToMessage,
   currentUser,
-  getReplySnippet
+  getReplySnippet,
+  authorUser
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -457,12 +459,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   return (
     <>
       <div 
-        className={`group flex flex-col mb-4 animate-slide-up ${isOwnMessage ? 'items-end' : 'items-start'}`}
+        className={`group flex mb-4 animate-slide-up ${isOwnMessage ? 'flex-row-reverse' : 'flex-row'}`}
         onMouseEnter={() => setIsHovered(true)}
         onMouseLeave={() => setIsHovered(false)}
         id={`msg-${message.id}`}
       >
-        <div className={`flex flex-col max-w-[95%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+        {/* Avatar */}
+        <div className={`flex-none ${isOwnMessage ? 'ml-2' : 'mr-2'} self-end mb-1`}>
+            {authorUser?.avatar ? (
+                <img src={authorUser.avatar} alt={authorUser.username} className="w-8 h-8 rounded-full object-cover border border-gray-300 dark:border-gray-700" />
+            ) : (
+                <div className="w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-[10px] font-bold text-white uppercase border border-gray-300 dark:border-gray-700">
+                    {message.username.substring(0, 2)}
+                </div>
+            )}
+        </div>
+
+        <div className={`flex flex-col max-w-[85%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
           
           {/* Username, Timestamp & Pin Indicator */}
           <div className="flex items-center space-x-2 mb-1 px-1">

@@ -210,9 +210,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
               <div className="flex justify-between items-start mb-1">
                 <div className="flex flex-col">
                     <span className="font-bold text-xs text-purple-700 dark:text-neon-purple">{msg.username}</span>
-                    {msg.channelId !== activeChannelId && (
-                        <span className="text-[10px] text-gray-400 bg-gray-200 dark:bg-gray-700 px-1 rounded w-fit mt-0.5">#{getChannelName(msg.channelId)}</span>
-                    )}
+                    <span className="text-[10px] text-gray-400 bg-gray-200 dark:bg-gray-700 px-1 rounded w-fit mt-0.5">#{getChannelName(msg.channelId)}</span>
                 </div>
                 <span className="text-[10px] text-gray-500">{new Date(msg.timestamp).toLocaleDateString()}</span>
               </div>

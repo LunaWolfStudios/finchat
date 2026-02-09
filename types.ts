@@ -4,7 +4,8 @@ export interface User {
   id: string;
   username: string;
   color?: string;
-  isMobile?: boolean; // New property
+  isMobile?: boolean; 
+  avatar?: string; // URL to avatar image
 }
 
 export interface Channel {

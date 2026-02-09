@@ -8,6 +8,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
 import { PinnedPanel } from './components/PinnedPanel';
+import { SettingsModal } from './components/SettingsModal';
 import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight, Smartphone } from 'lucide-react';
 
 const App: React.FC = () => {
@@ -26,6 +27,7 @@ const App: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPinnedOpen, setIsPinnedOpen] = useState(false);
   const [isUserListOpen, setIsUserListOpen] = useState(false);
+  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
 
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
@@ -45,6 +47,10 @@ const App: React.FC = () => {
   // Pagination
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
+
+  // Swipe Gestures
+  const touchStartX = useRef<number>(0);
+  const touchEndX = useRef<number>(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -168,7 +174,7 @@ const App: React.FC = () => {
     }
   }, [activeChannelId]);
 
-  // Update Known Users (Persistent offline list)
+  // Update Known Users (Persistent offline list & Avatars)
   useEffect(() => {
      setKnownUsers(prev => {
          const next = new Map(prev);
@@ -176,17 +182,22 @@ const App: React.FC = () => {
          
          // Add from messages (might miss mobile info if not in message, but generic info persists)
          messages.forEach(m => {
-             if (!next.has(m.userId)) {
+             const existing = next.get(m.userId);
+             // Basic user info if missing
+             if (!existing) {
                  next.set(m.userId, { id: m.userId, username: m.username });
                  changed = true;
              }
          });
          
-         // Add from online users (Contains mobile info)
+         // Add from online users (Contains mobile info & avatar)
          onlineUsers.forEach(u => {
-             // Always update online users to capture latest mobile state
-             next.set(u.id, u);
-             changed = true;
+             const existing = next.get(u.id);
+             // Update if new info (especially avatar)
+             if (!existing || existing.avatar !== u.avatar || existing.username !== u.username) {
+                 next.set(u.id, u);
+                 changed = true;
+             }
          });
          
          return changed ? next : prev;
@@ -247,8 +258,16 @@ const App: React.FC = () => {
   }, [onlineUsers, knownUsers]);
 
   const allKnownUsers = useMemo(() => {
-    return [...onlineUsers, ...offlineUsers];
-  }, [onlineUsers, offlineUsers]);
+    const list = [...onlineUsers];
+    const onlineIds = new Set(onlineUsers.map(u => u.id));
+    
+    knownUsers.forEach((u, id) => {
+        if (!onlineIds.has(id)) {
+            list.push(u);
+        }
+    });
+    return list;
+  }, [onlineUsers, knownUsers]);
 
   // Calculate NEW pins for notification
   const newPinsCount = useMemo(() => {
@@ -287,12 +306,15 @@ const App: React.FC = () => {
     }
   };
 
-  const handleChangeUsername = () => {
-    if (!user || !editNameValue.trim()) return;
-    const updatedUser = { ...user, username: editNameValue.trim() };
+  const handleUpdateUser = (updatedUser: User) => {
     setUser(updatedUser);
     localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(updatedUser));
     chatService.updateUser(updatedUser);
+  };
+
+  const handleChangeUsername = () => {
+    if (!user || !editNameValue.trim()) return;
+    handleUpdateUser({ ...user, username: editNameValue.trim() });
     setIsEditingName(false);
   };
 
@@ -356,6 +378,29 @@ const App: React.FC = () => {
       }
   };
 
+  // --- Gestures ---
+  const handleTouchStart = (e: React.TouchEvent) => {
+    touchStartX.current = e.targetTouches[0].clientX;
+  };
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    touchEndX.current = e.changedTouches[0].clientX;
+    handleSwipe();
+  };
+
+  const handleSwipe = () => {
+    const diff = touchStartX.current - touchEndX.current;
+    if (Math.abs(diff) > 50) { // Threshold 50px
+      if (diff < 0) {
+        // Swipe Right -> Open Menu
+        setIsUserListOpen(true);
+      } else {
+        // Swipe Left -> Close Menu
+        setIsUserListOpen(false);
+      }
+    }
+  };
+
   if (!user) {
     return <LoginModal onLogin={handleLogin} />;
   }
@@ -363,11 +408,26 @@ const App: React.FC = () => {
   return (
     <div className="flex flex-col h-[100dvh] bg-white dark:bg-neon-dark text-gray-900 dark:text-gray-100 transition-colors duration-300 overflow-hidden">
       
+      {isSettingsOpen && (
+          <SettingsModal 
+            user={user} 
+            onClose={() => setIsSettingsOpen(false)} 
+            onUpdateUser={handleUpdateUser} 
+          />
+      )}
+
       {/* Header */}
       <header className="flex-none flex items-center justify-between px-4 py-3 bg-white dark:bg-gray-900/80 backdrop-blur-md border-b border-gray-200 dark:border-gray-800 z-50 shadow-md">
         <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded bg-gradient-to-br from-neon-cyan to-neon-purple flex items-center justify-center shadow-[0_0_10px_rgba(0,255,255,0.4)]">
-             <Fish className="text-white" />
+          <div 
+            onClick={() => setIsSettingsOpen(true)}
+            className="w-10 h-10 rounded-full cursor-pointer overflow-hidden bg-gradient-to-br from-neon-cyan to-neon-purple flex items-center justify-center shadow-[0_0_10px_rgba(0,255,255,0.4)] hover:scale-105 transition-transform"
+          >
+             {user.avatar ? (
+                 <img src={user.avatar} alt="Profile" className="w-full h-full object-cover" />
+             ) : (
+                 <Fish className="text-white" />
+             )}
           </div>
           <div className="flex flex-col">
             <h1 className="font-display font-bold text-lg md:text-xl tracking-wide dark:text-white leading-tight">
@@ -451,7 +511,11 @@ const App: React.FC = () => {
       </header>
 
       {/* Main Layout */}
-      <div className="flex-1 overflow-hidden relative flex">
+      <div 
+        className="flex-1 overflow-hidden relative flex"
+        onTouchStart={handleTouchStart}
+        onTouchEnd={handleTouchEnd}
+      >
         
         {/* Sidebar */}
         <div className={`
@@ -523,13 +587,15 @@ const App: React.FC = () => {
                   <ul className="space-y-2">
                     {onlineUsers.map((u, idx) => (
                       <li key={`${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
-                        {u.isMobile ? (
-                            <Smartphone size={14} className="text-green-500 drop-shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
+                        {u.avatar ? (
+                            <img src={u.avatar} alt={u.username} className="w-6 h-6 rounded-full object-cover border border-gray-300 dark:border-gray-700" />
+                        ) : u.isMobile ? (
+                            <Smartphone size={16} className="text-green-500 drop-shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
                         ) : (
                             <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
                         )}
-                        <span className={u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}>{u.username}</span>
-                        {u.id === user.id && <span className="text-[10px] text-gray-400">(You)</span>}
+                        <span className={`truncate ${u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}`}>{u.username}</span>
+                        {u.id === user.id && <span className="text-[10px] text-gray-400 flex-shrink-0">(You)</span>}
                       </li>
                     ))}
                   </ul>
@@ -543,8 +609,12 @@ const App: React.FC = () => {
                   <ul className="space-y-2 opacity-60">
                     {offlineUsers.map((u, idx) => (
                       <li key={`off-${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-                        <div className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-600"></div>
-                        <span>{u.username}</span>
+                        {u.avatar ? (
+                             <img src={u.avatar} alt={u.username} className="w-6 h-6 rounded-full object-cover grayscale" />
+                        ) : (
+                             <div className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-600"></div>
+                        )}
+                        <span className="truncate">{u.username}</span>
                       </li>
                     ))}
                   </ul>
@@ -604,6 +674,7 @@ const App: React.FC = () => {
              ) : (
                messages.map((msg, index) => {
                  const isOwn = msg.userId === user.id;
+                 const authorUser = knownUsers.get(msg.userId);
                  return (
                    <MessageBubble 
                      key={msg.id}
@@ -615,6 +686,7 @@ const App: React.FC = () => {
                      scrollToMessage={(id) => handleJumpToMessage(id)}
                      currentUser={user}
                      getReplySnippet={getReplySnippet}
+                     authorUser={authorUser}
                    />
                  );
                })
@@ -628,6 +700,7 @@ const App: React.FC = () => {
               replyTo={replyTo}
               onCancelReply={() => setReplyTo(null)}
               allUsers={allKnownUsers}
+              onlineUsers={onlineUsers}
             />
           </div>
         </div>

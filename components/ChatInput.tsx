@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Send, Image as ImageIcon, Video, Mic, X, Paperclip, FileText, File as FileGeneric, UploadCloud } from 'lucide-react';
+import { Send, Image as ImageIcon, Video, Mic, X, Paperclip, FileText, File as FileGeneric, UploadCloud, Smartphone } from 'lucide-react';
 import { MAX_FILE_SIZE_BYTES } from '../constants';
 import { Message, MessageType, User } from '../types';
 
@@ -7,7 +7,8 @@ interface ChatInputProps {
   onSendMessage: (content: string, type: MessageType, file?: File) => void;
   replyTo: Message | null;
   onCancelReply: () => void;
-  allUsers: User[]; 
+  allUsers: User[];
+  onlineUsers: User[]; // Need this for correct status in mentions
 }
 
 interface PreviewItem {
@@ -17,7 +18,7 @@ interface PreviewItem {
   type: MessageType;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, allUsers = [] }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, allUsers = [], onlineUsers = [] }) => {
   const [text, setText] = useState('');
   const [previews, setPreviews] = useState<PreviewItem[]>([]);
   
@@ -153,10 +154,29 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
     onCancelReply();
   };
 
+  const filteredUsers = mentionQuery !== null 
+    ? allUsers.filter(u => u.username.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+    : [];
+
+  const insertMention = (username: string) => {
+    const textBefore = text.slice(0, mentionCursorPos - (mentionQuery?.length || 0) - 1);
+    const textAfter = text.slice(mentionCursorPos);
+    const newText = `${textBefore}@${username} ${textAfter}`;
+    setText(newText);
+    setMentionQuery(null);
+    textInputRef.current?.focus();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
+    }
+    
+    // TAB Autocomplete
+    if (e.key === 'Tab' && mentionQuery !== null && filteredUsers.length > 0) {
+        e.preventDefault();
+        insertMention(filteredUsers[0].username);
     }
   };
 
@@ -176,19 +196,6 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
       setMentionQuery(null);
     }
   };
-
-  const insertMention = (username: string) => {
-    const textBefore = text.slice(0, mentionCursorPos - (mentionQuery?.length || 0) - 1);
-    const textAfter = text.slice(mentionCursorPos);
-    const newText = `${textBefore}@${username} ${textAfter}`;
-    setText(newText);
-    setMentionQuery(null);
-    textInputRef.current?.focus();
-  };
-
-  const filteredUsers = mentionQuery !== null 
-    ? allUsers.filter(u => u.username.toLowerCase().startsWith(mentionQuery.toLowerCase()))
-    : [];
 
   return (
     <div 
@@ -211,16 +218,41 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
       {/* Mention Popup */}
       {mentionQuery !== null && filteredUsers.length > 0 && (
         <div className="absolute bottom-full mb-2 left-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden min-w-[150px] max-h-48 overflow-y-auto z-50">
-          {filteredUsers.map((u, idx) => (
-            <button
-              key={`${u.id}-${idx}`}
-              onClick={() => insertMention(u.username)}
-              className="w-full text-left px-3 py-2 text-sm hover:bg-neon-cyan/10 hover:text-neon-cyan flex items-center space-x-2 text-gray-700 dark:text-gray-300 transition-colors"
-            >
-              <div className="w-2 h-2 rounded-full bg-gray-500"></div>
-              <span>{u.username}</span>
-            </button>
-          ))}
+          {filteredUsers.map((u, idx) => {
+            const isOnline = onlineUsers.some(ou => ou.id === u.id);
+            const mobileStatus = onlineUsers.find(ou => ou.id === u.id)?.isMobile;
+            
+            return (
+              <button
+                key={`${u.id}-${idx}`}
+                onClick={() => insertMention(u.username)}
+                className="w-full text-left px-3 py-2 text-sm hover:bg-neon-cyan/10 hover:text-neon-cyan flex items-center space-x-2 text-gray-700 dark:text-gray-300 transition-colors"
+              >
+                {/* Avatar / Initials */}
+                <div className="relative">
+                    {u.avatar ? (
+                        <img src={u.avatar} alt={u.username} className="w-5 h-5 rounded-full object-cover" />
+                    ) : (
+                        <div className="w-5 h-5 rounded-full bg-gray-500 flex items-center justify-center text-[8px] font-bold text-white uppercase">
+                            {u.username.substring(0,2)}
+                        </div>
+                    )}
+                    
+                    {/* Status Dot for Avatar */}
+                    {isOnline && (
+                        <div className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-gray-800 flex items-center justify-center bg-green-500`}></div>
+                    )}
+                </div>
+
+                <span className="flex-1">{u.username}</span>
+
+                {/* Status Icon Text */}
+                {isOnline && (
+                    mobileStatus ? <Smartphone size={12} className="text-green-500" /> : <div className="w-2 h-2 rounded-full bg-green-500"></div>
+                )}
+              </button>
+            );
+          })}
         </div>
       )}
 
