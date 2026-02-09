@@ -7,7 +7,8 @@ import { ChatInput } from './components/ChatInput';
 import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp } from 'lucide-react';
+import { PinnedPanel } from './components/PinnedPanel';
+import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -16,6 +17,7 @@ const App: React.FC = () => {
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isPinnedOpen, setIsPinnedOpen] = useState(false);
   const [isUserListOpen, setIsUserListOpen] = useState(false);
 
   const [replyTo, setReplyTo] = useState<Message | null>(null);
@@ -263,6 +265,7 @@ const App: React.FC = () => {
 
   const scrollToMessage = (id: string) => {
     setIsSearchOpen(false);
+    setIsPinnedOpen(false);
     const element = document.getElementById(`msg-${id}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
@@ -333,10 +336,19 @@ const App: React.FC = () => {
           >
              {notificationsEnabled ? <Bell size={20}/> : <BellOff size={20}/>}
           </button>
+          
+          <button 
+            onClick={() => { setIsPinnedOpen(!isPinnedOpen); setIsSearchOpen(false); }}
+            className={`p-2 rounded-full transition-all ${isPinnedOpen ? 'bg-yellow-500/20 text-yellow-500' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+            title="Pinned Messages"
+          >
+            <Pin size={20} className={isPinnedOpen ? "fill-current" : ""} />
+          </button>
 
           <button 
-            onClick={() => setIsSearchOpen(!isSearchOpen)}
+            onClick={() => { setIsSearchOpen(!isSearchOpen); setIsPinnedOpen(false); }}
             className={`p-2 rounded-full transition-all ${isSearchOpen ? 'bg-neon-cyan/20 text-neon-cyan' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+            title="Search"
           >
             <Search size={20} />
           </button>
@@ -422,6 +434,13 @@ const App: React.FC = () => {
           <SearchPanel 
             isOpen={isSearchOpen} 
             onClose={() => setIsSearchOpen(false)}
+            messages={messages}
+            onJumpToMessage={scrollToMessage}
+          />
+
+          <PinnedPanel 
+            isOpen={isPinnedOpen}
+            onClose={() => setIsPinnedOpen(false)}
             messages={messages}
             onJumpToMessage={scrollToMessage}
           />

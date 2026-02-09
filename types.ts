@@ -17,6 +17,7 @@ export interface Message {
   replyTo?: string; // ID of the message being replied to
   edited: boolean;
   deleted: boolean;
+  pinned?: boolean; // New property
   reactions?: { [emoji: string]: string[] }; // Emoji char -> Array of User IDs
   hiddenPreviews?: string[]; // List of URLs whose previews should be hidden
 }

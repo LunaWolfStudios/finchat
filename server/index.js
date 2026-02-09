@@ -194,14 +194,14 @@ wss.on('connection', (ws) => {
         const payload = message.payload;
         const index = currentMessages.findIndex(m => m.id === payload.id);
         if (index !== -1) {
-          // Preserve reactions if any, as payload might not have them if edited from client state loosely
+          // Preserve reactions and pinned status if any
           const oldMsg = currentMessages[index];
           // Merge old message with new payload (content, edited, hiddenPreviews)
-          // Ensure reactions are preserved
           currentMessages[index] = { 
             ...oldMsg, 
             ...payload, 
-            reactions: oldMsg.reactions 
+            reactions: oldMsg.reactions,
+            pinned: oldMsg.pinned
           };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -211,7 +211,24 @@ wss.on('connection', (ws) => {
         const payload = message.payload;
         const index = currentMessages.findIndex(m => m.id === payload.id);
         if (index !== -1) {
-          currentMessages[index] = { ...currentMessages[index], deleted: true, content: 'Message deleted', type: 'text' };
+          currentMessages[index] = { 
+            ...currentMessages[index], 
+            deleted: true, 
+            content: 'Message deleted', 
+            type: 'text',
+            pinned: false // Unpin if deleted
+          };
+          saveAllMessages(currentMessages);
+          broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
+        }
+      }
+      else if (message.action === 'PIN') {
+        const { messageId } = message.payload;
+        const index = currentMessages.findIndex(m => m.id === messageId);
+        
+        if (index !== -1) {
+          // Toggle pinned status
+          currentMessages[index].pinned = !currentMessages[index].pinned;
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
         }
@@ -247,6 +264,7 @@ wss.on('connection', (ws) => {
         if (!message.timestamp) message.timestamp = new Date().toISOString();
         if (!message.reactions) message.reactions = {};
         if (!message.hiddenPreviews) message.hiddenPreviews = [];
+        if (!message.pinned) message.pinned = false;
         
         currentMessages.push(message);
         saveAllMessages(currentMessages);

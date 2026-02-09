@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, LinkPreview, User } from '../types';
-import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check, FileText, Download } from 'lucide-react';
+import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check, FileText, Download, Pin } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface MessageBubbleProps {
@@ -311,6 +311,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     setShowMobileOptions(false);
   };
 
+  const handlePin = () => {
+    chatService.togglePin(message.id);
+    setShowMobileOptions(false);
+  };
+
   const handleEmojiSelect = (emoji: string) => {
     const stored = localStorage.getItem('finchat_recent_emojis');
     const current = stored ? JSON.parse(stored) : [];
@@ -459,7 +464,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       >
         <div className={`flex flex-col max-w-[95%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
           
-          {/* Username & Timestamp */}
+          {/* Username, Timestamp & Pin Indicator */}
           <div className="flex items-center space-x-2 mb-1 px-1">
             <span className={`text-xs font-display font-bold ${isOwnMessage ? 'text-cyan-600 dark:text-neon-cyan' : 'text-purple-600 dark:text-neon-purple'}`}>
               {message.username}
@@ -467,6 +472,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <span className="text-[10px] text-gray-500 dark:text-gray-400">
               {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
             </span>
+            {message.pinned && (
+              <Pin size={10} className="text-yellow-500 dark:text-yellow-400 fill-current" />
+            )}
           </div>
 
           {/* Reply Context */}
@@ -494,6 +502,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
             }
             ${isMentioned ? 'bg-yellow-500/20 dark:bg-yellow-500/10 border-2 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : ''}
+            ${message.pinned ? 'shadow-[0_0_10px_rgba(234,179,8,0.15)] border-yellow-500/30' : ''}
           `}>
             {isEditing ? (
               <div className="flex flex-col space-y-2 min-w-[200px] w-full" onClick={e => e.stopPropagation()}>
@@ -552,6 +561,16 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       <ReactionPicker onSelect={handleEmojiSelect} onClose={() => setShowReactionPicker(false)} />
                     )}
                   </div>
+
+                  {/* Pin Button */}
+                  <button 
+                    onClick={handlePin}
+                    className={`p-1 hover:text-yellow-600 dark:hover:text-yellow-400 ${message.pinned ? 'text-yellow-500 dark:text-yellow-400' : 'text-gray-500 dark:text-gray-400'}`}
+                    title={message.pinned ? "Unpin" : "Pin"}
+                  >
+                    <Pin size={16} className={message.pinned ? "fill-current" : ""} />
+                  </button>
+
                   <button 
                     onClick={() => onReply(message)} 
                     className="p-1 hover:text-cyan-600 dark:hover:text-neon-cyan text-gray-500 dark:text-gray-400" 
@@ -667,6 +686,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     className="flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
                  >
                     <Reply size={18} className="mr-3 text-neon-cyan"/> Reply
+                 </button>
+
+                 <button 
+                    onClick={handlePin}
+                    className="flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
+                 >
+                    <Pin size={18} className={`mr-3 ${message.pinned ? "text-yellow-500 fill-current" : "text-gray-500"}`}/> 
+                    {message.pinned ? "Unpin Message" : "Pin Message"}
                  </button>
                  
                  <button 

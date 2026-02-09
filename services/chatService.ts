@@ -151,7 +151,7 @@ class ChatService {
     return data.url;
   }
 
-  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted' | 'reactions' | 'hiddenPreviews'> & { file?: File }): Promise<void> {
+  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted' | 'reactions' | 'hiddenPreviews' | 'pinned'> & { file?: File }): Promise<void> {
     let content = message.content;
 
     // Handle File Upload if present
@@ -175,6 +175,7 @@ class ChatService {
       replyTo: message.replyTo,
       edited: false,
       deleted: false,
+      pinned: false,
       reactions: {},
       hiddenPreviews: []
     };
@@ -208,6 +209,13 @@ class ChatService {
         type: 'text' as const 
     };
     this.sendToSocket({ action: 'DELETE', payload: updatedMessage });
+  }
+
+  togglePin(messageId: string) {
+    this.sendToSocket({ 
+      action: 'PIN', 
+      payload: { messageId } 
+    });
   }
 
   sendJoin(user: User) {
