@@ -21,6 +21,7 @@ const App: React.FC = () => {
   const [newChannelName, setNewChannelName] = useState('');
 
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
+  const [knownUsers, setKnownUsers] = useState<Map<string, string>>(new Map()); // id -> username
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPinnedOpen, setIsPinnedOpen] = useState(false);
@@ -97,42 +98,12 @@ const App: React.FC = () => {
       }
     };
     loadChannels();
+  }, []);
 
-    // Subscribe to WS
-    const unsubscribe = chatService.subscribe(
-      (newMessage) => {
-        // Only append if it belongs to current channel
-        setMessages(prev => {
-          if (newMessage.channelId === activeChannelId) {
-             return [...prev, newMessage];
-          }
-          return prev;
-        });
-      },
-      (status) => {
-        setConnectionStatus(status);
-        if (status === 'connected' && user) {
-           chatService.sendJoin(user);
-        }
-      },
-      (updatedMessage) => {
-         // Update if in list (even if channel differs, though typically we only hold current channel msgs)
-         setMessages(prev => prev.map(m => m.id === updatedMessage.id ? updatedMessage : m));
-      },
-      (usersList) => {
-        setOnlineUsers(usersList);
-      }
-    );
-
-    return () => { unsubscribe(); };
-  }, [user?.id]); // Note: removed activeChannelId from dep to avoid resubscribing constantly. Logic inside callback handles filtering via ref if needed, but here we use state functional update which captures activeChannelId in closure? NO.
-  // Correction: state updater `setMessages` doesn't know about `activeChannelId`. We need `activeChannelId` in dependency or a ref.
-  // Optimization: Let's use a Ref for activeChannelId to avoid resubscribing
-  
   const activeChannelRef = useRef(activeChannelId);
   useEffect(() => { activeChannelRef.current = activeChannelId; }, [activeChannelId]);
   
-  // Re-implement subscription to handle channel filtering correctly
+  // Subscriptions
   useEffect(() => {
     const unsubscribe = chatService.subscribe(
         (newMessage) => {
@@ -146,11 +117,18 @@ const App: React.FC = () => {
                 });
             }
         },
-        null, // Status handled in other effect or ignored here
+        (status) => {
+            setConnectionStatus(status);
+            if (status === 'connected' && user) {
+               chatService.sendJoin(user);
+            }
+        },
         (updatedMessage) => {
              setMessages(prev => prev.map(m => m.id === updatedMessage.id ? updatedMessage : m));
         },
-        null // Users handled elsewhere
+        (usersList) => {
+            setOnlineUsers(usersList);
+        }
     );
     return () => unsubscribe();
   }, [user, notificationsEnabled, channels]);
@@ -184,6 +162,30 @@ const App: React.FC = () => {
         fetchHistory();
     }
   }, [activeChannelId]);
+
+  // Update Known Users (Persistent offline list)
+  useEffect(() => {
+     setKnownUsers(prev => {
+         const next = new Map(prev);
+         let changed = false;
+         
+         messages.forEach(m => {
+             if (!next.has(m.userId)) {
+                 next.set(m.userId, m.username);
+                 changed = true;
+             }
+         });
+         
+         onlineUsers.forEach(u => {
+             if (!next.has(u.id)) {
+                 next.set(u.id, u.username);
+                 changed = true;
+             }
+         });
+         
+         return changed ? next : prev;
+     });
+  }, [messages, onlineUsers]);
 
 
   // Auto-scroll
@@ -229,27 +231,22 @@ const App: React.FC = () => {
   // Derive Offline Users
   const offlineUsers = useMemo(() => {
     const onlineIds = new Set(onlineUsers.map(u => u.id));
-    const knownUsers = new Map<string, string>(); 
-
-    messages.forEach(msg => {
-      if (!knownUsers.has(msg.userId)) {
-        knownUsers.set(msg.userId, msg.username);
-      }
-    });
-
     const offline: User[] = [];
-    knownUsers.forEach((name, id) => {
-      if (!onlineIds.has(id)) {
-        offline.push({ id, username: name });
-      }
+    knownUsers.forEach((username, id) => {
+        if (!onlineIds.has(id)) {
+            offline.push({ id, username });
+        }
     });
-
     return offline;
-  }, [messages, onlineUsers]);
+  }, [onlineUsers, knownUsers]);
 
   const allKnownUsers = useMemo(() => {
     return [...onlineUsers, ...offlineUsers];
   }, [onlineUsers, offlineUsers]);
+
+  const pinnedCount = useMemo(() => {
+      return messages.filter(m => m.pinned && !m.deleted).length;
+  }, [messages]);
 
   const getReplySnippet = useCallback((id: string) => {
     const msg = messages.find(m => m.id === id);
@@ -329,7 +326,6 @@ const App: React.FC = () => {
           // Switch Channel first
           setActiveChannelId(channelIdOfMsg);
           // Wait briefly for channel switch effect to fire and load messages
-          // Note: This is imperfect without a complex loading state machine, but sufficient for V1
           await new Promise(r => setTimeout(r, 600)); 
       }
 
@@ -404,10 +400,15 @@ const App: React.FC = () => {
           
           <button 
             onClick={() => { setIsPinnedOpen(!isPinnedOpen); setIsSearchOpen(false); }}
-            className={`p-2 rounded-full transition-all ${isPinnedOpen ? 'bg-yellow-500/20 text-yellow-500' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+            className={`p-2 rounded-full transition-all relative ${isPinnedOpen ? 'bg-yellow-500/20 text-yellow-500' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
             title="Pinned Messages"
           >
             <Pin size={20} className={isPinnedOpen ? "fill-current" : ""} />
+            {pinnedCount > 0 && (
+                <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-[9px] flex items-center justify-center rounded-full font-bold shadow-sm">
+                    {pinnedCount > 9 ? '9+' : pinnedCount}
+                </span>
+            )}
           </button>
 
           <button 

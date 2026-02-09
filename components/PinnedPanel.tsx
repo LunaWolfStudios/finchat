@@ -21,7 +21,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = ({ isOpen, onClose, messa
       {/* Header */}
       <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
         <h3 className="text-cyan-700 dark:text-neon-cyan font-display font-bold flex items-center">
-          <Pin size={18} className="mr-2" /> Pinned Messages
+          <Pin size={18} className="mr-2" /> Pinned Messages ({pinnedMessages.length})
         </h3>
         <button onClick={onClose} className="text-gray-400 hover:text-gray-800 dark:hover:text-white transition-colors">
           <X size={20} />
