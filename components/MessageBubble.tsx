@@ -273,6 +273,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+
+  useEffect(() => {
+    if (isHovered || showReactionPicker) {
+      const stored = localStorage.getItem('finchat_recent_emojis');
+      if (stored) {
+        try {
+          setRecentEmojis(JSON.parse(stored).slice(0, 3));
+        } catch (e) {}
+      }
+    }
+  }, [isHovered, showReactionPicker]);
 
   const handleSaveEdit = () => {
     if (editContent.trim() !== message.content) {
@@ -393,30 +405,44 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {/* Action Overlay */}
           {!message.deleted && (
             <div className={`
-              absolute -top-3 ${isOwnMessage ? '-left-20' : '-right-20'} 
-              flex items-center space-x-1 bg-gray-900/90 border border-gray-700 rounded-lg p-1
-              transition-opacity duration-200 z-10
+              absolute -top-8 ${isOwnMessage ? 'right-0' : 'left-0'} 
+              flex items-center space-x-1 bg-gray-900/90 border border-gray-700 rounded-lg p-1.5
+              transition-opacity duration-200 z-10 shadow-lg
               ${isHovered || showReactionPicker ? 'opacity-100' : 'opacity-0 pointer-events-none'}
             `}>
+              {/* Quick Reactions */}
+              {recentEmojis.map(emoji => (
+                <button 
+                  key={emoji}
+                  onClick={() => handleReaction(emoji)}
+                  className="p-1 hover:bg-white/10 rounded text-base transition-colors min-w-[24px] flex items-center justify-center"
+                  title={emoji}
+                >
+                  {emoji}
+                </button>
+              ))}
+
+              {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-700 mx-1"></div>}
+
               <div className="relative">
                 <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-400 text-gray-400" title="React">
-                  <Smile size={14} />
+                  <Smile size={16} />
                 </button>
                 {showReactionPicker && (
                   <ReactionPicker onSelect={handleReaction} onClose={() => setShowReactionPicker(false)} />
                 )}
               </div>
               <button onClick={() => onReply(message)} className="p-1 hover:text-neon-cyan text-gray-400" title="Reply">
-                <Reply size={14} />
+                <Reply size={16} />
               </button>
               {isOwnMessage && message.type === 'text' && (
                 <button onClick={() => setIsEditing(true)} className="p-1 hover:text-neon-purple text-gray-400" title="Edit">
-                  <Edit2 size={14} />
+                  <Edit2 size={16} />
                 </button>
               )}
               {isOwnMessage && (
                 <button onClick={() => onDelete(message.id)} className="p-1 hover:text-neon-pink text-gray-400" title="Delete">
-                  <Trash2 size={14} />
+                  <Trash2 size={16} />
                 </button>
               )}
             </div>
