@@ -1,0 +1,18 @@
+// Network Configuration
+// Adjust these to match your server's IP if running on a local network (e.g., '192.168.1.X')
+
+// Fallback to localhost if hostname is empty (e.g. file:// protocol or some environments)
+const HOST = window.location.hostname || 'localhost'; 
+const API_PORT = 4000;
+
+export const CONFIG = {
+  // The HTTP API URL for history and uploads
+  API_URL: `http://${HOST}:${API_PORT}`,
+  
+  // The WebSocket URL for real-time chat
+  WS_URL: `ws://${HOST}:${API_PORT}`,
+  
+  // Constraints
+  MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024, // 50MB
+  RECONNECT_INTERVAL_MS: 3000,
+};

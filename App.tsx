@@ -7,7 +7,7 @@ import { ChatInput } from './components/ChatInput';
 import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
-import { Search, Hash, Users, Activity } from 'lucide-react';
+import { Search, Hash, Users, Activity, Wifi, WifiOff } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -16,6 +16,7 @@ const App: React.FC = () => {
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [searchFilters, setSearchFilters] = useState<SearchFilters>({ query: '' });
+  const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -28,15 +29,25 @@ const App: React.FC = () => {
       setUser(JSON.parse(storedUser));
     }
 
-    // 2. Load Messages & Run Archive Job
-    const loadedMessages = chatService.getMessages();
-    setMessages(loadedMessages);
-    chatService.runArchiveJob();
+    // 2. Load Initial History
+    const fetchHistory = async () => {
+      const history = await chatService.getMessages();
+      setMessages(history);
+    };
+    fetchHistory();
 
-    // 3. Subscribe to real-time updates
-    const unsubscribe = chatService.subscribe((newMessage) => {
-      setMessages(prev => [...prev, newMessage]);
-    });
+    // 3. Subscribe to real-time updates and status
+    const unsubscribe = chatService.subscribe(
+      (newMessage) => {
+        setMessages(prev => [...prev, newMessage]);
+      },
+      (status) => {
+        setConnectionStatus(status);
+      },
+      (updatedMessage) => {
+        setMessages(prev => prev.map(m => m.id === updatedMessage.id ? updatedMessage : m));
+      }
+    );
 
     return () => {
       unsubscribe();
@@ -79,31 +90,32 @@ const App: React.FC = () => {
   const handleSendMessage = async (content: string, type: MessageType, file?: File) => {
     if (!user) return;
     
-    // In a real app, upload file here and get URL.
-    // Here we already have the DataURL in content.
-    await chatService.saveMessage({
-      userId: user.id,
-      username: user.username,
-      type,
-      content,
-      fileName: file?.name,
-      replyTo: replyTo?.id
-    });
-    
-    // Optimistic update happens via subscriber for broadcast, 
-    // but for local sender, we force a refresh if broadcast is async
-    setMessages(chatService.getMessages());
-    setReplyTo(null);
+    // Optimistic UI updates are harder with async uploads, so we wait for socket echo
+    // But we could add a "pending" state here if desired.
+    try {
+      await chatService.saveMessage({
+        userId: user.id,
+        username: user.username,
+        type,
+        content, // If file, this is base64 preview, service handles upload
+        fileName: file?.name,
+        replyTo: replyTo?.id,
+        file: file // Pass the raw file to service
+      });
+      setReplyTo(null);
+    } catch (e) {
+      alert("Failed to send message. Check server connection.");
+    }
   };
 
   const handleEditMessage = (id: string, newContent: string) => {
-    const updated = chatService.editMessage(id, newContent);
-    setMessages(updated);
+    const msg = messages.find(m => m.id === id);
+    if (msg) chatService.editMessage(msg, newContent);
   };
 
   const handleDeleteMessage = (id: string) => {
-    const updated = chatService.deleteMessage(id);
-    setMessages(updated);
+    const msg = messages.find(m => m.id === id);
+    if (msg) chatService.deleteMessage(msg);
   };
 
   const scrollToMessage = (id: string) => {
@@ -134,7 +146,15 @@ const App: React.FC = () => {
               {APP_NAME} <span className="text-neon-cyan text-sm">{user.username}</span>
             </h1>
             <div className="flex items-center space-x-2 text-xs text-gray-500">
-              <span className="flex items-center"><div className="w-2 h-2 bg-green-500 rounded-full mr-1"></div> Online</span>
+              {connectionStatus === 'connected' ? (
+                <span className="flex items-center text-green-500 font-bold">
+                  <Wifi size={12} className="mr-1" /> Online
+                </span>
+              ) : (
+                <span className="flex items-center text-red-500 font-bold animate-pulse">
+                  <WifiOff size={12} className="mr-1" /> {connectionStatus === 'connecting' ? 'Connecting...' : 'Offline'}
+                </span>
+              )}
               <span className="hidden md:inline">| Global Channel</span>
             </div>
           </div>
@@ -161,7 +181,7 @@ const App: React.FC = () => {
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Stats</h2>
               <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
                  <span className="flex items-center"><Users size={14} className="mr-2"/> Users</span>
-                 <span>1 (You)</span>
+                 <span>?</span>
               </div>
               <div className="flex items-center justify-between text-sm text-gray-400">
                  <span className="flex items-center"><Activity size={14} className="mr-2"/> Msgs</span>
@@ -171,8 +191,8 @@ const App: React.FC = () => {
            
            <div className="mt-auto">
              <div className="p-4 rounded-xl bg-neon-purple/5 border border-neon-purple/20">
-               <h3 className="text-neon-purple font-display text-sm font-bold mb-1">Archival Active</h3>
-               <p className="text-xs text-gray-500">Messages older than 180 days are automatically compressed locally.</p>
+               <h3 className="text-neon-purple font-display text-sm font-bold mb-1">Server Active</h3>
+               <p className="text-xs text-gray-500">Data stored in <code>/data/messages.json</code> on host.</p>
              </div>
            </div>
         </div>
@@ -189,7 +209,11 @@ const App: React.FC = () => {
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar"
           >
-             {filteredMessages.length === 0 ? (
+             {connectionStatus === 'connecting' && messages.length === 0 ? (
+                <div className="flex justify-center items-center h-full text-neon-cyan animate-pulse">
+                  Connecting to server...
+                </div>
+             ) : filteredMessages.length === 0 ? (
                <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-50">
                  <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center mb-4">
                    <Hash size={40} />

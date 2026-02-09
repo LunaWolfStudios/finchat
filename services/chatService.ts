@@ -1,124 +1,176 @@
 import { Message, User, ArchiveStats } from '../types';
-import { STORAGE_KEY_MESSAGES, STORAGE_KEY_ARCHIVE, ARCHIVE_AGE_DAYS } from '../constants';
-
-// BroadcastChannel for cross-tab communication (simulating WebSockets)
-const channel = new BroadcastChannel('finchat_global_room');
+import { CONFIG } from '../config';
 
 // Helper to generate UUID
 const generateId = () => crypto.randomUUID();
 
-export const chatService = {
-  // --- Event Listeners ---
-  subscribe: (callback: (msg: Message) => void) => {
-    channel.onmessage = (event) => {
-      if (event.data && event.data.type === 'NEW_MESSAGE') {
-        callback(event.data.payload);
+type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
+
+class ChatService {
+  private socket: WebSocket | null = null;
+  private messageCallback: ((msg: Message) => void) | null = null;
+  private updateCallback: ((msg: Message) => void) | null = null;
+  private statusCallback: ((status: ConnectionStatus) => void) | null = null;
+  
+  // Track state internally so late subscribers get the current status immediately
+  private connectionState: ConnectionStatus = 'disconnected'; 
+
+  constructor() {
+    this.connect();
+  }
+
+  private connect() {
+    this.updateState('connecting');
+    
+    this.socket = new WebSocket(CONFIG.WS_URL);
+
+    this.socket.onopen = () => {
+      console.log('Connected to FinChat Server');
+      this.updateState('connected');
+    };
+
+    this.socket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'NEW_MESSAGE' && this.messageCallback) {
+          this.messageCallback(data.payload);
+        } else if (data.type === 'UPDATE_MESSAGE' && this.updateCallback) {
+          this.updateCallback(data.payload);
+        }
+      } catch (e) {
+        console.error("Failed to parse WS message", e);
       }
     };
-    return () => {
-      channel.onmessage = null;
-    };
-  },
 
-  // --- CRUD Operations ---
-  getMessages: (): Message[] => {
+    this.socket.onclose = () => {
+      this.updateState('disconnected');
+      console.log('Disconnected. Reconnecting in 3s...');
+      setTimeout(() => this.connect(), CONFIG.RECONNECT_INTERVAL_MS);
+    };
+
+    this.socket.onerror = (err) => {
+      console.error('WebSocket Error:', err);
+      // Only mark disconnected if not already open
+      if (this.socket?.readyState !== WebSocket.OPEN) {
+        this.updateState('disconnected');
+      }
+    };
+  }
+
+  private updateState(status: ConnectionStatus) {
+    this.connectionState = status;
+    if (this.statusCallback) {
+      this.statusCallback(status);
+    }
+  }
+
+  // --- Subscriptions ---
+  subscribe(
+    onNewMessage: (msg: Message) => void, 
+    onStatusChange?: (status: ConnectionStatus) => void,
+    onMessageUpdate?: (msg: Message) => void
+  ) {
+    this.messageCallback = onNewMessage;
+    this.statusCallback = onStatusChange || null;
+    this.updateCallback = onMessageUpdate || null;
+    
+    // IMPORTANT: Immediately notify the new subscriber of the CURRENT state.
+    // This fixes the race condition where the socket connects before the UI mounts.
+    if (onStatusChange) {
+      onStatusChange(this.connectionState);
+    }
+    
+    // Return unsubscribe function
+    return () => {
+      this.messageCallback = null;
+      this.statusCallback = null;
+      this.updateCallback = null;
+    };
+  }
+
+  // --- API Operations ---
+
+  async getMessages(): Promise<Message[]> {
     try {
-      const stored = localStorage.getItem(STORAGE_KEY_MESSAGES);
-      return stored ? JSON.parse(stored) : [];
+      const res = await fetch(`${CONFIG.API_URL}/messages`);
+      if (!res.ok) throw new Error('Failed to fetch messages');
+      return await res.json();
     } catch (e) {
-      console.error("Failed to load messages", e);
+      console.error("Could not load history:", e);
       return [];
     }
-  },
+  }
 
-  saveMessage: async (message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted'>): Promise<Message> => {
+  async uploadFile(file: File): Promise<string> {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(`${CONFIG.API_URL}/upload`, {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!res.ok) throw new Error('File upload failed');
+    const data = await res.json();
+    return data.url;
+  }
+
+  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted'> & { file?: File }): Promise<void> {
+    let content = message.content;
+
+    // Handle File Upload if present
+    if (message.file && message.type !== 'text') {
+      try {
+        content = await this.uploadFile(message.file);
+      } catch (e) {
+        console.error("Upload failed", e);
+        throw new Error("Failed to upload media");
+      }
+    }
+
     const newMessage: Message = {
-      ...message,
       id: generateId(),
+      userId: message.userId,
+      username: message.username,
       timestamp: new Date().toISOString(),
+      type: message.type,
+      content: content,
+      fileName: message.fileName,
+      replyTo: message.replyTo,
       edited: false,
       deleted: false,
     };
 
-    // Simulate network delay
-    await new Promise(resolve => setTimeout(resolve, 300));
-
-    const messages = chatService.getMessages();
-    messages.push(newMessage);
-    
-    try {
-      localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
-      // Broadcast to other tabs
-      channel.postMessage({ type: 'NEW_MESSAGE', payload: newMessage });
-      return newMessage;
-    } catch (e) {
-      console.error("Storage full?", e);
-      throw new Error("Failed to send message. Local storage might be full.");
-    }
-  },
-
-  editMessage: (id: string, newContent: string): Message[] => {
-    const messages = chatService.getMessages();
-    const index = messages.findIndex(m => m.id === id);
-    if (index !== -1) {
-      messages[index].content = newContent;
-      messages[index].edited = true;
-      localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
-      // In a real app, we'd broadcast an update event too. 
-      // For this demo, we'll force reload via the parent component or assume simple append-only for broadcast.
-      // To keep it simple, we won't broadcast edits to other tabs in this V1 demo, 
-      // but we will update local state.
-    }
-    return messages;
-  },
-
-  deleteMessage: (id: string): Message[] => {
-    const messages = chatService.getMessages();
-    const index = messages.findIndex(m => m.id === id);
-    if (index !== -1) {
-      messages[index].deleted = true;
-      messages[index].content = "Message deleted";
-      messages[index].type = 'text'; // Reset type to text for placeholder
-      localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(messages));
-    }
-    return messages;
-  },
-
-  // --- Archival Logic ---
-  runArchiveJob: (): ArchiveStats => {
-    const messages = chatService.getMessages();
-    const now = new Date();
-    const cutoff = new Date(now.getTime() - (ARCHIVE_AGE_DAYS * 24 * 60 * 60 * 1000));
-
-    const activeMessages = [];
-    const archivedMessages = [];
-
-    messages.forEach(msg => {
-      if (new Date(msg.timestamp) < cutoff) {
-        archivedMessages.push(msg);
-      } else {
-        activeMessages.push(msg);
-      }
-    });
-
-    if (archivedMessages.length > 0) {
-        // In a real app, we would compress and send to server. 
-        // Here we just move them to a separate storage key to keep the main list fast.
-        const existingArchive = localStorage.getItem(STORAGE_KEY_ARCHIVE);
-        const archiveList = existingArchive ? JSON.parse(existingArchive) : [];
-        const newArchiveList = [...archiveList, ...archivedMessages];
-        
-        try {
-            localStorage.setItem(STORAGE_KEY_ARCHIVE, JSON.stringify(newArchiveList));
-            localStorage.setItem(STORAGE_KEY_MESSAGES, JSON.stringify(activeMessages));
-        } catch (e) {
-            console.error("Archive storage failed", e);
-        }
-    }
-
-    return {
-        archivedCount: archivedMessages.length,
-        lastRun: now.toISOString()
-    };
+    this.sendToSocket(newMessage);
   }
-};
+
+  editMessage(originalMessage: Message, newContent: string) {
+    const updatedMessage = { ...originalMessage, content: newContent, edited: true };
+    this.sendToSocket({ action: 'EDIT', payload: updatedMessage });
+  }
+
+  deleteMessage(originalMessage: Message) {
+    const updatedMessage = { 
+        ...originalMessage, 
+        deleted: true, 
+        content: 'Message deleted',
+        type: 'text' as const 
+    };
+    this.sendToSocket({ action: 'DELETE', payload: updatedMessage });
+  }
+
+  private sendToSocket(data: any) {
+    if (this.socket && this.socket.readyState === WebSocket.OPEN) {
+      this.socket.send(JSON.stringify(data));
+    } else {
+      console.warn("Socket not connected, cannot send message");
+    }
+  }
+
+  // Stub for archive job
+  runArchiveJob(): ArchiveStats {
+    return { archivedCount: 0, lastRun: new Date().toISOString() };
+  }
+}
+
+export const chatService = new ChatService();
