@@ -1,6 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Message, LinkPreview, User } from '../types';
-import { Edit2, Trash2, Reply, ExternalLink, Smile, X, MoreVertical } from 'lucide-react';
+import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface MessageBubbleProps {
@@ -73,18 +73,15 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
         }
 
         // Regex to capture <url> OR url
-        // Group 1: <url> (should hide preview)
-        // Group 2: url (should show preview)
         const urlRegex = /(<https?:\/\/[^\s>]+>)|(https?:\/\/[^\s]+)/g;
         const urlParts = part.split(urlRegex);
 
         return (
           <span key={i}>
             {urlParts.map((subPart, j) => {
-              if (!subPart) return null; // Split might return undefineds due to capture groups
+              if (!subPart) return null; 
 
               if (subPart.startsWith('<') && subPart.endsWith('>') && subPart.match(/<https?:\/\//)) {
-                // Manually hidden via angle brackets
                 const cleanUrl = subPart.slice(1, -1);
                 return (
                   <a 
@@ -113,7 +110,6 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
                     >
                       {subPart} <ExternalLink size={10} className="ml-1 inline" />
                     </a>
-                    {/* Render Preview Card if not hidden */}
                     {!isHidden && (
                       <LinkPreviewCard 
                         url={subPart} 
@@ -140,12 +136,12 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
                               return <s key={l} className="opacity-70">{strikePart.slice(2, -2)}</s>;
                             }
                             
-                            // Parse Mentions (@username)
-                            const mentionParts = strikePart.split(/(@\w+)/g);
+                            // CHANGED: Improved Regex to include hyphens and underscores for usernames
+                            const mentionParts = strikePart.split(/(@[\w-]+)/g);
                             return (
                                 <span key={l}>
                                     {mentionParts.map((mPart, m) => {
-                                        if (mPart.match(/^@\w+$/)) {
+                                        if (mPart.match(/^@[\w-]+$/)) {
                                             return <span key={m} className="font-bold text-blue-600 dark:text-blue-400">{mPart}</span>;
                                         }
                                         return <span key={m}>{mPart}</span>;
@@ -235,17 +231,15 @@ const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () 
   }, []);
 
   const handleSelect = (emoji: string) => {
-    // Update recents
     const newRecents = [emoji, ...recents.filter(e => e !== emoji)].slice(0, 8);
     localStorage.setItem('finchat_recent_emojis', JSON.stringify(newRecents));
     setRecents(newRecents);
-    
     onSelect(emoji);
     onClose();
   };
 
   return (
-    <div className="absolute bottom-full mb-1 -left-2 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up">
+    <div className="absolute bottom-full mb-2 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up">
       <div className="flex justify-between items-center mb-2 pb-1 border-b border-gray-700">
         <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Reactions</span>
         <button onClick={onClose} className="text-gray-400 hover:text-white"><XIcon size={14}/></button>
@@ -287,11 +281,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   
-  // Mobile Action Toggle
-  const [showActions, setShowActions] = useState(false);
+  // Mobile Interaction State
+  const [showMobileOptions, setShowMobileOptions] = useState(false);
+  const touchTimer = useRef<NodeJS.Timeout | null>(null);
 
+  // Initialize recents
   useEffect(() => {
-    if (isHovered || showReactionPicker || showActions) {
+    if (isHovered || showReactionPicker || showMobileOptions) {
       const stored = localStorage.getItem('finchat_recent_emojis');
       if (stored) {
         try {
@@ -299,7 +295,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         } catch (e) {}
       }
     }
-  }, [isHovered, showReactionPicker, showActions]);
+  }, [isHovered, showReactionPicker, showMobileOptions]);
 
   const handleSaveEdit = () => {
     if (editContent.trim() !== message.content) {
@@ -311,20 +307,31 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const handleReaction = (emoji: string) => {
     if (!currentUser) return;
     chatService.toggleReaction(message.id, emoji, currentUser.id);
-    setShowActions(false);
+    setShowMobileOptions(false);
   };
   
   const handleRemovePreview = (url: string) => {
     chatService.removePreview(message, url);
   };
-  
-  const toggleActions = (e: React.MouseEvent) => {
-    // Don't toggle if clicking a button or link inside
-    if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).tagName === 'A') return;
-    
-    // For Desktop, we generally don't need this as hover works, but for consistency we can allow it
-    // For Mobile, this is the primary way to interact with Video bubbles
-    setShowActions(!showActions);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(message.content);
+    setShowMobileOptions(false);
+  };
+
+  // --- Long Press Logic ---
+  const handleTouchStart = () => {
+    touchTimer.current = setTimeout(() => {
+      setShowMobileOptions(true);
+    }, 500); // 500ms long press triggers options
+  };
+
+  const handleTouchEnd = () => {
+    if (touchTimer.current) clearTimeout(touchTimer.current);
+  };
+
+  const handleTouchMove = () => {
+    if (touchTimer.current) clearTimeout(touchTimer.current);
   };
 
   const isMentioned = currentUser && !isOwnMessage && message.content.includes(`@${currentUser.username}`);
@@ -334,7 +341,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       return <span className="italic text-gray-500">Message deleted</span>;
     }
 
-    // CHANGED: Removed max-w-sm to fix horizontal scrolling on mobile, use max-w-full
     if (message.type === 'image') {
       return (
         <div className="relative group rounded-lg overflow-hidden border border-white/10 mt-1 max-w-full">
@@ -346,7 +352,6 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (message.type === 'video') {
       return (
         <div className="relative rounded-lg overflow-hidden border border-white/10 mt-1 max-w-full">
-          {/* Video element captures clicks, so we rely on the specific 'More' button for actions */}
           <video src={message.content} controls className="w-full max-h-64 bg-black" />
         </div>
       );
@@ -368,185 +373,232 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
            />;
   };
 
-  // Determine if we should show actions. 
-  // Desktop: Hover works. Mobile: showActions toggle works.
-  const isActionsVisible = isHovered || showActions || showReactionPicker;
-
   return (
-    <div 
-      className={`group flex flex-col mb-4 animate-slide-up ${isOwnMessage ? 'items-end' : 'items-start'}`}
-      onMouseEnter={() => setIsHovered(true)}
-      onMouseLeave={() => setIsHovered(false)}
-      id={`msg-${message.id}`}
-    >
-      <div className={`flex flex-col max-w-[95%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
-        
-        {/* Username & Timestamp */}
-        <div className="flex items-center space-x-2 mb-1 px-1">
-          <span className={`text-xs font-display font-bold ${isOwnMessage ? 'text-neon-cyan' : 'text-neon-purple'}`}>
-            {message.username}
-          </span>
-          <span className="text-[10px] text-gray-500 dark:text-gray-400">
-            {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
-          </span>
-        </div>
-
-        {/* Reply Context */}
-        {message.replyTo && (
-           <div 
-             className="text-xs text-gray-400 mb-1 border-l-2 border-neon-pink pl-2 cursor-pointer hover:text-white transition-colors"
-             onClick={() => scrollToMessage(message.replyTo!)}
-           >
-             Replying to message...
-           </div>
-        )}
-
-        {/* Bubble */}
-        <div 
-          onClick={toggleActions}
-          className={`
-          relative px-4 py-3 rounded-2xl shadow-md transition-all duration-200 min-w-[120px] cursor-default
-          ${isOwnMessage 
-            ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-gray-900 dark:text-gray-100 rounded-tr-sm' 
-            : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
-          }
-          ${isMentioned ? 'bg-yellow-500/20 dark:bg-yellow-500/10 border-2 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : ''}
-          ${isHovered || showActions ? 'shadow-lg' : ''}
-        `}>
-          {isEditing ? (
-            <div className="flex flex-col space-y-2 min-w-[200px]" onClick={e => e.stopPropagation()}>
-              <textarea 
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                className="bg-black/20 text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-neon-cyan w-full text-white"
-                rows={3}
-              />
-              <div className="flex justify-end space-x-2">
-                <button onClick={() => setIsEditing(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
-                <button onClick={handleSaveEdit} className="text-xs text-neon-cyan font-bold hover:text-white">Save</button>
-              </div>
-            </div>
-          ) : (
-            <>
-              {renderContent()}
-              {message.edited && !message.deleted && (
-                <span className="text-[10px] text-gray-400 block text-right mt-1">(edited)</span>
-              )}
-            </>
-          )}
-
-          {/* Action Trigger Button (Mobile/Video Friendly) */}
-          {!message.deleted && (
-             <button 
-               onClick={toggleActions}
-               className={`
-                 absolute bottom-1 right-1 p-1 rounded-full text-gray-400 hover:text-white hover:bg-black/20 transition-all md:hidden
-                 ${showActions ? 'bg-black/20 text-neon-cyan' : ''}
-               `}
-             >
-               <MoreVertical size={14} />
-             </button>
-          )}
-
-          {/* Action Overlay Toolbar */}
-          {!message.deleted && (
-            <div 
-              onClick={(e) => e.stopPropagation()}
-              className={`
-              absolute ${isOwnMessage ? 'right-0' : 'left-0'} 
-              /* Positioning: Desktop: Top (-8), Mobile: Bottom (Full) to prevent cutoff */
-              -bottom-10 md:-top-8 md:bottom-auto
-              
-              flex flex-wrap items-center gap-1 bg-gray-900/95 border border-gray-700 rounded-lg p-1.5
-              transition-opacity duration-200 z-20 shadow-xl backdrop-blur-sm
-              ${isActionsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}
-              max-w-[calc(100vw-2rem)]
-            `}>
-              {/* Quick Reactions */}
-              {recentEmojis.map(emoji => (
-                <button 
-                  key={emoji}
-                  onClick={() => handleReaction(emoji)}
-                  className="p-1 hover:bg-white/10 rounded text-base transition-colors min-w-[24px] flex items-center justify-center"
-                  title={emoji}
-                >
-                  {emoji}
-                </button>
-              ))}
-
-              {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-700 mx-0.5"></div>}
-
-              <div className="relative">
-                <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-400 text-gray-400" title="React">
-                  <Smile size={16} />
-                </button>
-                {showReactionPicker && (
-                  <ReactionPicker onSelect={handleReaction} onClose={() => setShowReactionPicker(false)} />
-                )}
-              </div>
-              <button 
-                onClick={() => { onReply(message); setShowActions(false); }} 
-                className="p-1 hover:text-neon-cyan text-gray-400" 
-                title="Reply"
-              >
-                <Reply size={16} />
-              </button>
-              {isOwnMessage && message.type === 'text' && (
-                <button 
-                  onClick={() => { setIsEditing(true); setShowActions(false); }} 
-                  className="p-1 hover:text-neon-purple text-gray-400" 
-                  title="Edit"
-                >
-                  <Edit2 size={16} />
-                </button>
-              )}
-              {isOwnMessage && (
-                <button 
-                  onClick={() => { onDelete(message.id); setShowActions(false); }} 
-                  className="p-1 hover:text-neon-pink text-gray-400" 
-                  title="Delete"
-                >
-                  <Trash2 size={16} />
-                </button>
-              )}
-              
-              {/* Close Action (Mobile Only) */}
-              <button 
-                onClick={() => setShowActions(false)}
-                className="md:hidden p-1 text-red-400 border-l border-gray-700 ml-1"
-              >
-                <X size={14} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        {/* Reactions Display */}
-        {message.reactions && Object.keys(message.reactions).length > 0 && (
-          <div className="flex flex-wrap gap-1 mt-1">
-            {Object.entries(message.reactions).map(([emoji, users]) => {
-              const userIds = users as string[];
-              return (
-                <button 
-                  key={emoji}
-                  onClick={() => handleReaction(emoji)}
-                  className={`
-                    text-xs px-1.5 py-0.5 rounded-full border flex items-center gap-1 transition-colors
-                    ${currentUser && userIds.includes(currentUser.id) 
-                      ? 'bg-neon-cyan/20 border-neon-cyan text-neon-cyan' 
-                      : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
-                    }
-                  `}
-                >
-                  <span>{emoji}</span>
-                  <span className="font-mono text-[10px]">{userIds.length}</span>
-                </button>
-              );
-            })}
+    <>
+      <div 
+        className={`group flex flex-col mb-4 animate-slide-up ${isOwnMessage ? 'items-end' : 'items-start'}`}
+        onMouseEnter={() => setIsHovered(true)}
+        onMouseLeave={() => setIsHovered(false)}
+        id={`msg-${message.id}`}
+      >
+        <div className={`flex flex-col max-w-[95%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+          
+          {/* Username & Timestamp */}
+          <div className="flex items-center space-x-2 mb-1 px-1">
+            <span className={`text-xs font-display font-bold ${isOwnMessage ? 'text-neon-cyan' : 'text-neon-purple'}`}>
+              {message.username}
+            </span>
+            <span className="text-[10px] text-gray-500 dark:text-gray-400">
+              {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+            </span>
           </div>
-        )}
 
+          {/* Reply Context */}
+          {message.replyTo && (
+            <div 
+              className="text-xs text-gray-400 mb-1 border-l-2 border-neon-pink pl-2 cursor-pointer hover:text-white transition-colors"
+              onClick={() => scrollToMessage(message.replyTo!)}
+            >
+              Replying to message...
+            </div>
+          )}
+
+          {/* Bubble Container */}
+          <div 
+            onTouchStart={handleTouchStart}
+            onTouchEnd={handleTouchEnd}
+            onTouchMove={handleTouchMove}
+            className={`
+            relative px-4 py-3 rounded-2xl shadow-md transition-all duration-300 min-w-[120px] cursor-default
+            group-hover:brightness-110 group-hover:shadow-lg
+            ${isOwnMessage 
+              ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-gray-900 dark:text-gray-100 rounded-tr-sm' 
+              : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
+            }
+            ${isMentioned ? 'bg-yellow-500/20 dark:bg-yellow-500/10 border-2 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : ''}
+          `}>
+            {isEditing ? (
+              <div className="flex flex-col space-y-2 min-w-[200px]" onClick={e => e.stopPropagation()}>
+                <textarea 
+                  value={editContent}
+                  onChange={(e) => setEditContent(e.target.value)}
+                  className="bg-black/20 text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-neon-cyan w-full text-white"
+                  rows={3}
+                />
+                <div className="flex justify-end space-x-2">
+                  <button onClick={() => setIsEditing(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
+                  <button onClick={handleSaveEdit} className="text-xs text-neon-cyan font-bold hover:text-white">Save</button>
+                </div>
+              </div>
+            ) : (
+              <>
+                {renderContent()}
+                {message.edited && !message.deleted && (
+                  <span className="text-[10px] text-gray-400 block text-right mt-1">(edited)</span>
+                )}
+              </>
+            )}
+
+            {/* Desktop Action Toolbar (Side-Aligned) */}
+            {!message.deleted && (
+              <div 
+                onClick={(e) => e.stopPropagation()}
+                className={`
+                hidden md:flex absolute top-0 bottom-0 m-auto h-fit
+                ${isOwnMessage ? 'right-full mr-2' : 'left-full ml-2'} 
+                items-center gap-1
+                transition-opacity duration-200 z-10 
+                ${isHovered || showReactionPicker ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+              `}>
+                <div className="flex items-center gap-1 bg-gray-900/95 border border-gray-700 rounded-lg p-1.5 shadow-xl backdrop-blur-sm">
+                  {/* Quick Reactions */}
+                  {recentEmojis.map(emoji => (
+                    <button 
+                      key={emoji}
+                      onClick={() => handleReaction(emoji)}
+                      className="p-1 hover:bg-white/10 rounded text-base transition-colors min-w-[24px] flex items-center justify-center"
+                      title={emoji}
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+
+                  {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-700 mx-0.5"></div>}
+
+                  <div className="relative">
+                    <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-400 text-gray-400" title="React">
+                      <Smile size={16} />
+                    </button>
+                    {showReactionPicker && (
+                      <ReactionPicker onSelect={handleReaction} onClose={() => setShowReactionPicker(false)} />
+                    )}
+                  </div>
+                  <button 
+                    onClick={() => onReply(message)} 
+                    className="p-1 hover:text-neon-cyan text-gray-400" 
+                    title="Reply"
+                  >
+                    <Reply size={16} />
+                  </button>
+                  
+                  <button onClick={handleCopy} className="p-1 hover:text-green-400 text-gray-400" title="Copy">
+                      <Copy size={16} />
+                  </button>
+
+                  {isOwnMessage && message.type === 'text' && (
+                    <button 
+                      onClick={() => setIsEditing(true)} 
+                      className="p-1 hover:text-neon-purple text-gray-400" 
+                      title="Edit"
+                    >
+                      <Edit2 size={16} />
+                    </button>
+                  )}
+                  {isOwnMessage && (
+                    <button 
+                      onClick={() => onDelete(message.id)} 
+                      className="p-1 hover:text-neon-pink text-gray-400" 
+                      title="Delete"
+                    >
+                      <Trash2 size={16} />
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* Reactions Display */}
+          {message.reactions && Object.keys(message.reactions).length > 0 && (
+            <div className="flex flex-wrap gap-1 mt-1">
+              {Object.entries(message.reactions).map(([emoji, users]) => {
+                const userIds = users as string[];
+                return (
+                  <button 
+                    key={emoji}
+                    onClick={() => handleReaction(emoji)}
+                    className={`
+                      text-xs px-1.5 py-0.5 rounded-full border flex items-center gap-1 transition-colors
+                      ${currentUser && userIds.includes(currentUser.id) 
+                        ? 'bg-neon-cyan/20 border-neon-cyan text-neon-cyan' 
+                        : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                      }
+                    `}
+                  >
+                    <span>{emoji}</span>
+                    <span className="font-mono text-[10px]">{userIds.length}</span>
+                  </button>
+                );
+              })}
+            </div>
+          )}
+
+        </div>
       </div>
-    </div>
+
+      {/* Mobile Options Modal (Action Sheet Style) */}
+      {showMobileOptions && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+           {/* Backdrop */}
+           <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMobileOptions(false)}></div>
+           
+           {/* Modal Content */}
+           <div className="relative bg-gray-900 border border-gray-700 rounded-xl w-full max-w-xs p-4 shadow-2xl animate-slide-up overflow-hidden">
+              <div className="flex justify-between items-center mb-4">
+                 <h3 className="text-neon-cyan font-bold text-sm uppercase tracking-wide">Message Options</h3>
+                 <button onClick={() => setShowMobileOptions(false)} className="text-gray-400"><X size={18}/></button>
+              </div>
+
+              {/* Reaction Grid */}
+              <div className="grid grid-cols-6 gap-2 mb-4">
+                 {DEFAULT_EMOJIS.slice(0, 12).map(emoji => (
+                    <button 
+                      key={emoji} 
+                      onClick={() => handleReaction(emoji)}
+                      className="text-xl p-2 bg-gray-800 rounded hover:bg-gray-700"
+                    >
+                      {emoji}
+                    </button>
+                 ))}
+              </div>
+
+              {/* Actions List */}
+              <div className="flex flex-col space-y-2">
+                 <button 
+                    onClick={() => { onReply(message); setShowMobileOptions(false); }}
+                    className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                 >
+                    <Reply size={18} className="mr-3 text-neon-cyan"/> Reply
+                 </button>
+                 
+                 <button 
+                    onClick={handleCopy}
+                    className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                 >
+                    <Copy size={18} className="mr-3 text-green-400"/> Copy Text
+                 </button>
+
+                 {isOwnMessage && message.type === 'text' && (
+                   <button 
+                      onClick={() => { setIsEditing(true); setShowMobileOptions(false); }}
+                      className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                   >
+                      <Edit2 size={18} className="mr-3 text-neon-purple"/> Edit
+                   </button>
+                 )}
+
+                 {isOwnMessage && (
+                   <button 
+                      onClick={() => { onDelete(message.id); setShowMobileOptions(false); }}
+                      className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                   >
+                      <Trash2 size={18} className="mr-3 text-neon-pink"/> Delete
+                   </button>
+                 )}
+              </div>
+           </div>
+        </div>
+      )}
+    </>
   );
 };
