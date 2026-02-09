@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { Message, User, MessageType } from './types';
 import { chatService, generateUUID } from './services/chatService';
 import { STORAGE_KEY_USER, APP_NAME } from './constants';
@@ -201,6 +201,13 @@ const App: React.FC = () => {
   const allKnownUsers = useMemo(() => {
     return [...onlineUsers, ...offlineUsers];
   }, [onlineUsers, offlineUsers]);
+
+  // Helper to find message content for replies
+  const getReplySnippet = useCallback((id: string) => {
+    const msg = messages.find(m => m.id === id);
+    if (!msg) return "Message unavailable";
+    return msg.type === 'text' ? msg.content : `[${msg.type}]`;
+  }, [messages]);
 
   const handleLogin = (username: string) => {
     const newUser: User = { id: generateUUID(), username };
@@ -456,6 +463,7 @@ const App: React.FC = () => {
                      onDelete={handleDeleteMessage}
                      scrollToMessage={scrollToMessage}
                      currentUser={user}
+                     getReplySnippet={getReplySnippet}
                    />
                  );
                })

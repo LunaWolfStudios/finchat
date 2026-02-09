@@ -11,6 +11,7 @@ interface MessageBubbleProps {
   onDelete: (id: string) => void;
   scrollToMessage: (id: string) => void;
   currentUser: User | null;
+  getReplySnippet?: (id: string) => string;
 }
 
 // --- Rich Text Parser Components ---
@@ -136,7 +137,7 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
                               return <s key={l} className="opacity-70">{strikePart.slice(2, -2)}</s>;
                             }
                             
-                            // CHANGED: Improved Regex to include hyphens and underscores for usernames
+                            // Regex to include hyphens and underscores for usernames
                             const mentionParts = strikePart.split(/(@[\w-]+)/g);
                             return (
                                 <span key={l}>
@@ -273,13 +274,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   onEdit, 
   onDelete,
   scrollToMessage,
-  currentUser
+  currentUser,
+  getReplySnippet
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  const [isCopied, setIsCopied] = useState(false);
   
   // Mobile Interaction State
   const [showMobileOptions, setShowMobileOptions] = useState(false);
@@ -315,15 +318,48 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   };
 
   const handleCopy = () => {
-    navigator.clipboard.writeText(message.content);
-    setShowMobileOptions(false);
+    // Attempt standard copy
+    const textToCopy = message.content;
+    const onSuccess = () => {
+        setIsCopied(true);
+        setShowMobileOptions(false);
+        setTimeout(() => setIsCopied(false), 2000);
+    };
+
+    if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(textToCopy)
+            .then(onSuccess)
+            .catch(err => {
+                console.error('Clipboard API failed', err);
+                fallbackCopy(textToCopy, onSuccess);
+            });
+    } else {
+        fallbackCopy(textToCopy, onSuccess);
+    }
   };
 
-  // --- Long Press Logic ---
+  const fallbackCopy = (text: string, onSuccess: () => void) => {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+          document.execCommand('copy');
+          onSuccess();
+      } catch (err) {
+          console.error('Fallback copy failed', err);
+      }
+      document.body.removeChild(textArea);
+  };
+
+  // --- Interaction Logic ---
   const handleTouchStart = () => {
     touchTimer.current = setTimeout(() => {
       setShowMobileOptions(true);
-    }, 500); // 500ms long press triggers options
+    }, 300); // 300ms long press triggers options (Shortened)
   };
 
   const handleTouchEnd = () => {
@@ -332,6 +368,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
   const handleTouchMove = () => {
     if (touchTimer.current) clearTimeout(touchTimer.current);
+  };
+
+  const handleDoubleClick = () => {
+    setShowMobileOptions(true);
   };
 
   const isMentioned = currentUser && !isOwnMessage && message.content.includes(`@${currentUser.username}`);
@@ -373,6 +413,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
            />;
   };
 
+  // Helper for reply preview
+  const replySnippet = message.replyTo && getReplySnippet ? getReplySnippet(message.replyTo) : "Message unavailable";
+
   return (
     <>
       <div 
@@ -396,10 +439,11 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           {/* Reply Context */}
           {message.replyTo && (
             <div 
-              className="text-xs text-gray-400 mb-1 border-l-2 border-neon-pink pl-2 cursor-pointer hover:text-white transition-colors"
+              className="text-xs text-gray-400 mb-1 border-l-2 border-neon-pink pl-2 cursor-pointer hover:text-white transition-colors max-w-full truncate"
               onClick={() => scrollToMessage(message.replyTo!)}
             >
-              Replying to message...
+              <span className="font-bold opacity-70">Replying to: </span>
+              <span className="italic">{replySnippet.length > 50 ? replySnippet.substring(0, 50) + '...' : replySnippet}</span>
             </div>
           )}
 
@@ -408,6 +452,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
             onTouchMove={handleTouchMove}
+            onDoubleClick={handleDoubleClick}
             className={`
             relative px-4 py-3 rounded-2xl shadow-md transition-all duration-300 min-w-[120px] cursor-default
             group-hover:brightness-110 group-hover:shadow-lg
@@ -418,12 +463,13 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ${isMentioned ? 'bg-yellow-500/20 dark:bg-yellow-500/10 border-2 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : ''}
           `}>
             {isEditing ? (
-              <div className="flex flex-col space-y-2 min-w-[200px]" onClick={e => e.stopPropagation()}>
+              <div className="flex flex-col space-y-2 min-w-[200px] w-full" onClick={e => e.stopPropagation()}>
                 <textarea 
                   value={editContent}
                   onChange={(e) => setEditContent(e.target.value)}
-                  className="bg-black/20 text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-neon-cyan w-full text-white"
-                  rows={3}
+                  className="bg-black/20 text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-neon-cyan w-full text-white resize-none"
+                  rows={Math.max(3, Math.min(10, editContent.split('\n').length + 1))}
+                  style={{ minHeight: '80px' }}
                 />
                 <div className="flex justify-end space-x-2">
                   <button onClick={() => setIsEditing(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
@@ -482,7 +528,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </button>
                   
                   <button onClick={handleCopy} className="p-1 hover:text-green-400 text-gray-400" title="Copy">
-                      <Copy size={16} />
+                      {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
                   </button>
 
                   {isOwnMessage && message.type === 'text' && (
@@ -536,7 +582,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         </div>
       </div>
 
-      {/* Mobile Options Modal (Action Sheet Style) */}
+      {/* Mobile/Desktop Action Sheet (Long Press / Double Click) */}
       {showMobileOptions && (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
            {/* Backdrop */}
@@ -549,7 +595,26 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                  <button onClick={() => setShowMobileOptions(false)} className="text-gray-400"><X size={18}/></button>
               </div>
 
-              {/* Reaction Grid */}
+              {/* Recent Reactions */}
+              {recentEmojis.length > 0 && (
+                <div className="mb-3">
+                    <div className="text-[10px] text-gray-500 mb-1">Recent</div>
+                    <div className="flex gap-2">
+                        {recentEmojis.map(emoji => (
+                             <button 
+                                key={`rec-${emoji}`} 
+                                onClick={() => handleReaction(emoji)}
+                                className="text-xl p-2 bg-gray-800/80 border border-gray-700 rounded hover:bg-gray-700"
+                              >
+                                {emoji}
+                              </button>
+                        ))}
+                    </div>
+                </div>
+              )}
+
+              {/* Default Reaction Grid */}
+              <div className="text-[10px] text-gray-500 mb-1">All</div>
               <div className="grid grid-cols-6 gap-2 mb-4">
                  {DEFAULT_EMOJIS.slice(0, 12).map(emoji => (
                     <button 
@@ -575,7 +640,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     onClick={handleCopy}
                     className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
                  >
-                    <Copy size={18} className="mr-3 text-green-400"/> Copy Text
+                    {isCopied ? <Check size={18} className="mr-3 text-green-500"/> : <Copy size={18} className="mr-3 text-green-400"/>} 
+                    {isCopied ? "Copied!" : "Copy Text"}
                  </button>
 
                  {isOwnMessage && message.type === 'text' && (
