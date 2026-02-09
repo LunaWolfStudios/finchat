@@ -26,11 +26,20 @@ const PORT = 4000;
 const DATA_DIR = path.join(__dirname, '../data');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
+const CHANNELS_FILE = path.join(DATA_DIR, 'channels.json');
 
 // Ensure directories exist
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
 if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
+
+// Initialize Files
 if (!fs.existsSync(MESSAGES_FILE)) fs.writeFileSync(MESSAGES_FILE, '[]');
+if (!fs.existsSync(CHANNELS_FILE)) {
+  const defaultChannels = [
+    { id: 'general', name: 'general', description: 'The lobby', createdAt: new Date().toISOString() }
+  ];
+  fs.writeFileSync(CHANNELS_FILE, JSON.stringify(defaultChannels, null, 2));
+}
 
 // --- EXPRESS APP SETUP ---
 const app = express();
@@ -56,13 +65,15 @@ const upload = multer({
   limits: { fileSize: 100 * 1024 * 1024 } // 100MB
 });
 
-// --- DATA ACCESS HELPERS (Synchronous to prevent race conditions) ---
+// --- DATA ACCESS HELPERS ---
 
 const getMessages = () => {
   try {
     if (!fs.existsSync(MESSAGES_FILE)) return [];
     const data = fs.readFileSync(MESSAGES_FILE, 'utf8');
-    return JSON.parse(data);
+    const msgs = JSON.parse(data);
+    // Backward compatibility: If no channelId, assign to 'general'
+    return msgs.map(m => (!m.channelId ? { ...m, channelId: 'general' } : m));
   } catch (err) {
     console.error("Error reading messages file:", err);
     return [];
@@ -77,23 +88,84 @@ const saveAllMessages = (messages) => {
   }
 };
 
+const getChannels = () => {
+  try {
+    if (!fs.existsSync(CHANNELS_FILE)) return [];
+    return JSON.parse(fs.readFileSync(CHANNELS_FILE, 'utf8'));
+  } catch (err) {
+    return [];
+  }
+};
+
+const saveChannels = (channels) => {
+  try {
+    fs.writeFileSync(CHANNELS_FILE, JSON.stringify(channels, null, 2));
+  } catch (err) {
+    console.error("Error writing channels file:", err);
+  }
+};
+
 // --- HTTP ENDPOINTS ---
 
-// Paginated Messages
-app.get('/messages', (req, res) => {
-  const allMessages = getMessages();
-  const limit = parseInt(req.query.limit) || 200;
-  const before = req.query.before;
+// Get Channels
+app.get('/channels', (req, res) => {
+  res.json(getChannels());
+});
 
-  let result = allMessages;
-
-  if (before) {
-    // Simple logic: filter where timestamp < before.
-    result = allMessages.filter(m => m.timestamp < before);
+// Create Channel
+app.post('/channels', (req, res) => {
+  const { name, description } = req.body;
+  if (!name) return res.status(400).send("Name required");
+  
+  const channels = getChannels();
+  // Simple dup check
+  if (channels.find(c => c.name.toLowerCase() === name.toLowerCase())) {
+    return res.status(400).send("Channel exists");
   }
 
-  // Take the LAST 'limit' items from the result
-  const slice = result.slice(-limit);
+  const newChannel = {
+    id: Date.now().toString(36),
+    name,
+    description: description || '',
+    createdAt: new Date().toISOString()
+  };
+  
+  channels.push(newChannel);
+  saveChannels(channels);
+  res.json(newChannel);
+});
+
+// Get Messages (Filtered by Channel & Search)
+app.get('/messages', (req, res) => {
+  let allMessages = getMessages();
+  const limit = parseInt(req.query.limit) || 200;
+  const before = req.query.before;
+  const channelId = req.query.channelId;
+  const query = req.query.q ? req.query.q.toLowerCase() : null;
+
+  // 1. Filter by Channel (if specified)
+  if (channelId && channelId !== 'all') {
+    allMessages = allMessages.filter(m => m.channelId === channelId);
+  }
+
+  // 2. Filter by Search Query (if specified)
+  if (query) {
+    allMessages = allMessages.filter(m => 
+      m.content.toLowerCase().includes(query) || 
+      m.username.toLowerCase().includes(query)
+    );
+  }
+
+  // 3. Filter by Pagination (Timestamp)
+  if (before) {
+    allMessages = allMessages.filter(m => m.timestamp < before);
+  }
+
+  // 4. Sort & Limit
+  // If searching, we might want newest matches. If paging, standard logic applies.
+  // Messages are stored chronologically (append-only), so slice from end is correct for recent.
+  
+  const slice = allMessages.slice(-limit);
   
   res.json(slice);
 });
@@ -106,32 +178,25 @@ app.post('/upload', upload.single('file'), (req, res) => {
   res.json({ url: fileUrl, filename: req.file.filename });
 });
 
-// Link Preview Endpoint
 app.get('/preview', async (req, res) => {
   const targetUrl = req.query.url;
   if (!targetUrl) return res.status(400).json({ error: 'Missing url' });
 
   try {
-    // Use Discordbot User-Agent to encourage sites (X, IG) to return OpenGraph tags
     const response = await fetch(targetUrl, {
-      headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'
-      },
-      signal: AbortSignal.timeout(5000) // 5s timeout
+      headers: { 'User-Agent': 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)' },
+      signal: AbortSignal.timeout(5000)
     });
     
     if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
     const html = await response.text();
 
-    // Robust Regex Parsing for OG and Twitter Tags
     const getMetaContent = (prop) => {
-      // Matches <meta property="og:title" content="..."> OR <meta name="twitter:title" content="...">
       const regex = new RegExp(`<meta\\s+(?:property|name)=["'](?:og:|twitter:)?${prop}["']\\s+content=["'](.*?)["']`, 'i');
       const match = html.match(regex);
       return match ? match[1] : null;
     };
 
-    // Fallback regex for title tag
     const title = getMetaContent('title') || html.match(/<title>(.*?)<\/title>/i)?.[1];
     const description = getMetaContent('description');
     const image = getMetaContent('image') || getMetaContent('image:src');
@@ -139,8 +204,6 @@ app.get('/preview', async (req, res) => {
 
     res.json({ url: targetUrl, title, description, image, siteName });
   } catch (e) {
-    console.error("Preview fetch error for", targetUrl, e.message);
-    // Return success with empty data to prevent client errors, just shows no preview
     res.json({ url: targetUrl });
   }
 });
@@ -148,60 +211,46 @@ app.get('/preview', async (req, res) => {
 // --- WEBSOCKET SERVER ---
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
-
-// Map to track connected users: WebSocket -> User Object
-const clients = new Map();
+const clients = new Map(); // ws -> user
 
 const broadcastUserList = () => {
   const users = Array.from(clients.values()).filter(u => u !== null);
-  // Deduplicate by ID to show unique users (in case of multiple tabs)
   const uniqueUsersMap = new Map();
   users.forEach(u => uniqueUsersMap.set(u.id, u));
   const uniqueUsers = Array.from(uniqueUsersMap.values());
-
   const msg = JSON.stringify({ type: 'USER_LIST', payload: uniqueUsers });
+  
   wss.clients.forEach((client) => {
-    if (client.readyState === 1) { // WebSocket.OPEN
-      client.send(msg);
-    }
+    if (client.readyState === 1) client.send(msg);
   });
 };
 
 wss.on('connection', (ws) => {
-  console.log('Client connected');
-  clients.set(ws, null); // Initialize as unknown
+  clients.set(ws, null);
 
   ws.on('message', (messageStr) => {
     try {
       const message = JSON.parse(messageStr);
       let broadcastMsg = null;
-      
       const currentMessages = getMessages();
 
-      if (message.action === 'JOIN') {
+      if (message.action === 'JOIN' || message.action === 'UPDATE_USER') {
         clients.set(ws, message.payload);
         broadcastUserList();
         return; 
-      }
-
-      if (message.action === 'UPDATE_USER') {
-        clients.set(ws, message.payload);
-        broadcastUserList();
-        return;
       }
 
       if (message.action === 'EDIT') {
         const payload = message.payload;
         const index = currentMessages.findIndex(m => m.id === payload.id);
         if (index !== -1) {
-          // Preserve reactions and pinned status if any
           const oldMsg = currentMessages[index];
-          // Merge old message with new payload (content, edited, hiddenPreviews)
           currentMessages[index] = { 
             ...oldMsg, 
             ...payload, 
             reactions: oldMsg.reactions,
-            pinned: oldMsg.pinned
+            pinned: oldMsg.pinned,
+            channelId: oldMsg.channelId || 'general' // Preserve channel
           };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -216,7 +265,7 @@ wss.on('connection', (ws) => {
             deleted: true, 
             content: 'Message deleted', 
             type: 'text',
-            pinned: false // Unpin if deleted
+            pinned: false
           };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -225,9 +274,7 @@ wss.on('connection', (ws) => {
       else if (message.action === 'PIN') {
         const { messageId } = message.payload;
         const index = currentMessages.findIndex(m => m.id === messageId);
-        
         if (index !== -1) {
-          // Toggle pinned status
           currentMessages[index].pinned = !currentMessages[index].pinned;
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -236,48 +283,40 @@ wss.on('connection', (ws) => {
       else if (message.action === 'REACTION') {
         const { messageId, emoji, userId } = message.payload;
         const index = currentMessages.findIndex(m => m.id === messageId);
-        
         if (index !== -1) {
           const msg = currentMessages[index];
           if (!msg.reactions) msg.reactions = {};
-          
           if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
           
           const users = msg.reactions[emoji];
           const userIdx = users.indexOf(userId);
           
-          if (userIdx === -1) {
-            // Add reaction
-            users.push(userId);
-          } else {
-            // Remove reaction (toggle)
+          if (userIdx === -1) users.push(userId);
+          else {
             users.splice(userIdx, 1);
             if (users.length === 0) delete msg.reactions[emoji];
           }
-          
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: msg };
         }
       }
       else {
-        // New Message (Standard)
+        // New Message
         if (!message.timestamp) message.timestamp = new Date().toISOString();
         if (!message.reactions) message.reactions = {};
         if (!message.hiddenPreviews) message.hiddenPreviews = [];
         if (!message.pinned) message.pinned = false;
+        if (!message.channelId) message.channelId = 'general'; // Default to general
         
         currentMessages.push(message);
         saveAllMessages(currentMessages);
         broadcastMsg = { type: 'NEW_MESSAGE', payload: message };
       }
 
-      // Broadcast to ALL connected clients
       if (broadcastMsg) {
         const msgStr = JSON.stringify(broadcastMsg);
         wss.clients.forEach((client) => {
-          if (client.readyState === 1) {
-            client.send(msgStr);
-          }
+          if (client.readyState === 1) client.send(msgStr);
         });
       }
 
@@ -287,19 +326,11 @@ wss.on('connection', (ws) => {
   });
 
   ws.on('close', () => {
-    console.log('Client disconnected');
     clients.delete(ws);
     broadcastUserList();
   });
 });
 
-// --- START SERVER ---
 server.listen(PORT, '0.0.0.0', () => {
-  console.log(`
-  🚀 FinChat Server Running!
-  --------------------------
-  API:    http://localhost:${PORT}
-  WS:     ws://localhost:${PORT}
-  Storage: ${DATA_DIR}
-  `);
+  console.log(`Server running on port ${PORT}`);
 });

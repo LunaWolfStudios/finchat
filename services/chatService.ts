@@ -1,12 +1,10 @@
-import { Message, User, ArchiveStats, LinkPreview } from '../types';
+import { Message, User, ArchiveStats, LinkPreview, Channel, SearchFilters } from '../types';
 import { CONFIG } from '../config';
 
-// Helper to generate UUID with fallback for insecure contexts (HTTP LAN)
 export const generateUUID = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
     return crypto.randomUUID();
   }
-  // Fallback implementation (RFC4122 version 4)
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
     const r = Math.random() * 16 | 0;
     const v = c === 'x' ? r : (r & 0x3 | 0x8);
@@ -23,7 +21,6 @@ class ChatService {
   private statusCallback: ((status: ConnectionStatus) => void) | null = null;
   private userListCallback: ((users: User[]) => void) | null = null;
   
-  // Track state internally so late subscribers get the current status immediately
   private connectionState: ConnectionStatus = 'disconnected'; 
   private currentUser: User | null = null;
 
@@ -33,16 +30,11 @@ class ChatService {
 
   private connect() {
     this.updateState('connecting');
-    
     this.socket = new WebSocket(CONFIG.WS_URL);
 
     this.socket.onopen = () => {
-      console.log('Connected to FinChat Server');
       this.updateState('connected');
-      // Re-send join if we reconnect and have a user
-      if (this.currentUser) {
-        this.sendJoin(this.currentUser);
-      }
+      if (this.currentUser) this.sendJoin(this.currentUser);
     };
 
     this.socket.onmessage = (event) => {
@@ -55,34 +47,24 @@ class ChatService {
         } else if (data.type === 'USER_LIST' && this.userListCallback) {
           this.userListCallback(data.payload);
         }
-      } catch (e) {
-        console.error("Failed to parse WS message", e);
-      }
+      } catch (e) { console.error("WS parse error", e); }
     };
 
     this.socket.onclose = () => {
       this.updateState('disconnected');
-      console.log('Disconnected. Reconnecting in 3s...');
       setTimeout(() => this.connect(), CONFIG.RECONNECT_INTERVAL_MS);
     };
 
-    this.socket.onerror = (err) => {
-      console.error('WebSocket Error:', err);
-      // Only mark disconnected if not already open
-      if (this.socket?.readyState !== WebSocket.OPEN) {
-        this.updateState('disconnected');
-      }
+    this.socket.onerror = () => {
+      if (this.socket?.readyState !== WebSocket.OPEN) this.updateState('disconnected');
     };
   }
 
   private updateState(status: ConnectionStatus) {
     this.connectionState = status;
-    if (this.statusCallback) {
-      this.statusCallback(status);
-    }
+    if (this.statusCallback) this.statusCallback(status);
   }
 
-  // --- Subscriptions ---
   subscribe(
     onNewMessage: (msg: Message) => void, 
     onStatusChange?: (status: ConnectionStatus) => void,
@@ -94,12 +76,8 @@ class ChatService {
     this.updateCallback = onMessageUpdate || null;
     this.userListCallback = onUserListUpdate || null;
     
-    // IMPORTANT: Immediately notify the new subscriber of the CURRENT state.
-    if (onStatusChange) {
-      onStatusChange(this.connectionState);
-    }
+    if (onStatusChange) onStatusChange(this.connectionState);
     
-    // Return unsubscribe function
     return () => {
       this.messageCallback = null;
       this.statusCallback = null;
@@ -108,22 +86,54 @@ class ChatService {
     };
   }
 
-  // --- API Operations ---
+  // --- API ---
 
-  async getMessages(limit = 200, before?: string): Promise<Message[]> {
+  async getChannels(): Promise<Channel[]> {
     try {
-      let url = `${CONFIG.API_URL}/messages?limit=${limit}`;
-      if (before) {
-        url += `&before=${encodeURIComponent(before)}`;
-      }
-      
+      const res = await fetch(`${CONFIG.API_URL}/channels`);
+      return await res.json();
+    } catch (e) {
+      return [];
+    }
+  }
+
+  async createChannel(name: string, description?: string): Promise<Channel> {
+    const res = await fetch(`${CONFIG.API_URL}/channels`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name, description })
+    });
+    if (!res.ok) throw new Error("Failed to create channel");
+    return await res.json();
+  }
+
+  async getMessages(channelId: string, limit = 200, before?: string): Promise<Message[]> {
+    try {
+      let url = `${CONFIG.API_URL}/messages?limit=${limit}&channelId=${channelId}`;
+      if (before) url += `&before=${encodeURIComponent(before)}`;
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch messages');
       return await res.json();
     } catch (e) {
-      console.error("Could not load history:", e);
       return [];
     }
+  }
+
+  async searchMessages(filters: SearchFilters): Promise<Message[]> {
+     try {
+       const params = new URLSearchParams();
+       if (filters.query) params.append('q', filters.query);
+       if (filters.channelId) params.append('channelId', filters.channelId);
+       // Note: complex filters like author/date handled in server or client-side post-processing
+       // For V1, we rely on backend text search + client filtering for other fields if needed, 
+       // but strictly backend 'q' search is most efficient.
+       
+       const res = await fetch(`${CONFIG.API_URL}/messages?${params.toString()}&limit=100`);
+       if (!res.ok) throw new Error('Search failed');
+       return await res.json();
+     } catch(e) {
+       return [];
+     }
   }
 
   async getLinkPreview(url: string): Promise<LinkPreview | null> {
@@ -131,21 +141,13 @@ class ChatService {
       const res = await fetch(`${CONFIG.API_URL}/preview?url=${encodeURIComponent(url)}`);
       if (!res.ok) return null;
       return await res.json();
-    } catch (e) {
-      console.error("Preview failed", e);
-      return null;
-    }
+    } catch (e) { return null; }
   }
 
   async uploadFile(file: File): Promise<string> {
     const formData = new FormData();
     formData.append('file', file);
-
-    const res = await fetch(`${CONFIG.API_URL}/upload`, {
-      method: 'POST',
-      body: formData,
-    });
-
+    const res = await fetch(`${CONFIG.API_URL}/upload`, { method: 'POST', body: formData });
     if (!res.ok) throw new Error('File upload failed');
     const data = await res.json();
     return data.url;
@@ -153,19 +155,15 @@ class ChatService {
 
   async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted' | 'reactions' | 'hiddenPreviews' | 'pinned'> & { file?: File }): Promise<void> {
     let content = message.content;
-
-    // Handle File Upload if present
     if (message.file && message.type !== 'text') {
       try {
         content = await this.uploadFile(message.file);
-      } catch (e) {
-        console.error("Upload failed", e);
-        throw new Error("Failed to upload media");
-      }
+      } catch (e) { throw new Error("Failed to upload media"); }
     }
 
     const newMessage: Message = {
       id: generateUUID(),
+      channelId: message.channelId || 'general',
       userId: message.userId,
       username: message.username,
       timestamp: new Date().toISOString(),
@@ -184,38 +182,22 @@ class ChatService {
   }
 
   editMessage(originalMessage: Message, newContent: string) {
-    const updatedMessage = { ...originalMessage, content: newContent, edited: true };
-    this.sendToSocket({ action: 'EDIT', payload: updatedMessage });
+    this.sendToSocket({ action: 'EDIT', payload: { ...originalMessage, content: newContent, edited: true } });
   }
 
   removePreview(originalMessage: Message, urlToRemove: string) {
     const currentHidden = originalMessage.hiddenPreviews || [];
     if (!currentHidden.includes(urlToRemove)) {
-      const updatedMessage = { 
-        ...originalMessage, 
-        hiddenPreviews: [...currentHidden, urlToRemove]
-      };
-      // We send 'EDIT' action to propagate the change. 
-      // Server merges payload, so this updates the hiddenPreviews field.
-      this.sendToSocket({ action: 'EDIT', payload: updatedMessage });
+      this.sendToSocket({ action: 'EDIT', payload: { ...originalMessage, hiddenPreviews: [...currentHidden, urlToRemove] } });
     }
   }
 
   deleteMessage(originalMessage: Message) {
-    const updatedMessage = { 
-        ...originalMessage, 
-        deleted: true, 
-        content: 'Message deleted',
-        type: 'text' as const 
-    };
-    this.sendToSocket({ action: 'DELETE', payload: updatedMessage });
+    this.sendToSocket({ action: 'DELETE', payload: { ...originalMessage, deleted: true, content: 'Message deleted', type: 'text' } });
   }
 
   togglePin(messageId: string) {
-    this.sendToSocket({ 
-      action: 'PIN', 
-      payload: { messageId } 
-    });
+    this.sendToSocket({ action: 'PIN', payload: { messageId } });
   }
 
   sendJoin(user: User) {
@@ -229,21 +211,15 @@ class ChatService {
   }
 
   toggleReaction(messageId: string, emoji: string, userId: string) {
-    this.sendToSocket({ 
-      action: 'REACTION', 
-      payload: { messageId, emoji, userId } 
-    });
+    this.sendToSocket({ action: 'REACTION', payload: { messageId, emoji, userId } });
   }
 
   private sendToSocket(data: any) {
     if (this.socket && this.socket.readyState === WebSocket.OPEN) {
       this.socket.send(JSON.stringify(data));
-    } else {
-      console.warn("Socket not connected, cannot send message");
     }
   }
 
-  // Stub for archive job
   runArchiveJob(): ArchiveStats {
     return { archivedCount: 0, lastRun: new Date().toISOString() };
   }

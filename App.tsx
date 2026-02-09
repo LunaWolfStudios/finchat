@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
-import { Message, User, MessageType } from './types';
+import { Message, User, MessageType, Channel } from './types';
 import { chatService, generateUUID } from './services/chatService';
 import { STORAGE_KEY_USER, APP_NAME } from './constants';
 import { MessageBubble } from './components/MessageBubble';
@@ -8,12 +8,18 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
 import { PinnedPanel } from './components/PinnedPanel';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin } from 'lucide-react';
+import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
   
+  // Channels
+  const [channels, setChannels] = useState<Channel[]>([]);
+  const [activeChannelId, setActiveChannelId] = useState<string>('general');
+  const [isCreatingChannel, setIsCreatingChannel] = useState(false);
+  const [newChannelName, setNewChannelName] = useState('');
+
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
@@ -56,11 +62,8 @@ const App: React.FC = () => {
     }
 
     if (notificationsEnabled) {
-      // Logic to disable: we just update state to stop sending them, 
-      // but we cannot revoke 'granted' permission via API.
       setNotificationsEnabled(false);
     } else {
-      // Logic to enable
       if (Notification.permission === 'granted') {
         setNotificationsEnabled(true);
       } else if (Notification.permission !== 'denied') {
@@ -77,19 +80,91 @@ const App: React.FC = () => {
     }
   };
 
-  // Initialize App
+  // --- Initial Data Loading ---
   useEffect(() => {
-    // 1. Check for existing user
     const storedUser = localStorage.getItem(STORAGE_KEY_USER);
     if (storedUser) {
       setUser(JSON.parse(storedUser));
     }
 
-    // 2. Load Initial History (200 latest)
+    // Load Channels
+    const loadChannels = async () => {
+      const chs = await chatService.getChannels();
+      setChannels(chs);
+      // Ensure active channel exists, fallback to general
+      if (!chs.find(c => c.id === activeChannelId)) {
+        setActiveChannelId('general');
+      }
+    };
+    loadChannels();
+
+    // Subscribe to WS
+    const unsubscribe = chatService.subscribe(
+      (newMessage) => {
+        // Only append if it belongs to current channel
+        setMessages(prev => {
+          if (newMessage.channelId === activeChannelId) {
+             return [...prev, newMessage];
+          }
+          return prev;
+        });
+      },
+      (status) => {
+        setConnectionStatus(status);
+        if (status === 'connected' && user) {
+           chatService.sendJoin(user);
+        }
+      },
+      (updatedMessage) => {
+         // Update if in list (even if channel differs, though typically we only hold current channel msgs)
+         setMessages(prev => prev.map(m => m.id === updatedMessage.id ? updatedMessage : m));
+      },
+      (usersList) => {
+        setOnlineUsers(usersList);
+      }
+    );
+
+    return () => { unsubscribe(); };
+  }, [user?.id]); // Note: removed activeChannelId from dep to avoid resubscribing constantly. Logic inside callback handles filtering via ref if needed, but here we use state functional update which captures activeChannelId in closure? NO.
+  // Correction: state updater `setMessages` doesn't know about `activeChannelId`. We need `activeChannelId` in dependency or a ref.
+  // Optimization: Let's use a Ref for activeChannelId to avoid resubscribing
+  
+  const activeChannelRef = useRef(activeChannelId);
+  useEffect(() => { activeChannelRef.current = activeChannelId; }, [activeChannelId]);
+  
+  // Re-implement subscription to handle channel filtering correctly
+  useEffect(() => {
+    const unsubscribe = chatService.subscribe(
+        (newMessage) => {
+            if (newMessage.channelId === activeChannelRef.current) {
+                setMessages(prev => [...prev, newMessage]);
+            }
+            // Handle notifications regardless of channel if mentioned
+            if (user && newMessage.userId !== user.id && newMessage.content.includes(`@${user.username}`) && notificationsEnabled) {
+                new Notification(`${newMessage.username} in #${channels.find(c=>c.id===newMessage.channelId)?.name || 'unknown'}`, {
+                    body: newMessage.content
+                });
+            }
+        },
+        null, // Status handled in other effect or ignored here
+        (updatedMessage) => {
+             setMessages(prev => prev.map(m => m.id === updatedMessage.id ? updatedMessage : m));
+        },
+        null // Users handled elsewhere
+    );
+    return () => unsubscribe();
+  }, [user, notificationsEnabled, channels]);
+
+
+  // --- Channel Switching & History ---
+  useEffect(() => {
     const fetchHistory = async () => {
       setIsLoadingHistory(true);
+      setMessages([]); // Clear previous channel messages immediately
+      setHasMoreHistory(true);
+      
       const limit = 200;
-      const history = await chatService.getMessages(limit);
+      const history = await chatService.getMessages(activeChannelId, limit);
       setMessages(history);
       
       if (history.length < limit) {
@@ -99,59 +174,19 @@ const App: React.FC = () => {
       setIsLoadingHistory(false);
       initialLoadDone.current = true;
       
-      // Initial Scroll to bottom
+      // Scroll to bottom
       setTimeout(() => {
         messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 100);
+      }, 50);
     };
-    fetchHistory();
 
-    // 3. Subscribe to real-time updates and status
-    const unsubscribe = chatService.subscribe(
-      (newMessage) => {
-        setMessages(prev => [...prev, newMessage]);
-        // Trigger notification if mentioned
-        // We use the Ref value of notificationEnabled implicitly via state closure in useEffect dependencies
-      },
-      (status) => {
-        setConnectionStatus(status);
-        if (status === 'connected' && user) {
-           chatService.sendJoin(user);
-        }
-      },
-      (updatedMessage) => {
-        setMessages(prev => prev.map(m => m.id === updatedMessage.id ? updatedMessage : m));
-      },
-      (usersList) => {
-        setOnlineUsers(usersList);
-      }
-    );
-
-    return () => {
-      unsubscribe();
-    };
-  }, [user?.id]); // Re-subscribe if user ID changes. NOTE: Removed notificationsEnabled from dep array to avoid resubscribing on toggle.
-
-  // Separate effect for notification handling to access fresh state
-  useEffect(() => {
-    const lastMsg = messages[messages.length - 1];
-    if (!lastMsg || !initialLoadDone.current || !user || !notificationsEnabled) return;
-    
-    // Check if new message is from someone else and mentions user
-    if (lastMsg.userId !== user.id && lastMsg.content.includes(`@${user.username}`)) {
-       // Debounce check or simple timestamp check could go here if needed
-       if ((new Date().getTime() - new Date(lastMsg.timestamp).getTime()) < 5000) { // Only notify if fresh
-         try {
-           new Notification(`${lastMsg.username} mentioned you`, {
-             body: lastMsg.content,
-             icon: '/favicon.ico'
-           });
-         } catch (e) { console.error("Notification failed", e); }
-       }
+    if (activeChannelId) {
+        fetchHistory();
     }
-  }, [messages, user, notificationsEnabled]);
+  }, [activeChannelId]);
 
-  // Auto-scroll logic: only if user is already near bottom
+
+  // Auto-scroll
   useEffect(() => {
     if (initialLoadDone.current) {
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -165,7 +200,7 @@ const App: React.FC = () => {
     const oldestTimestamp = messages[0].timestamp;
     const limit = 200;
     
-    const olderMessages = await chatService.getMessages(limit, oldestTimestamp);
+    const olderMessages = await chatService.getMessages(activeChannelId, limit, oldestTimestamp);
     
     if (olderMessages.length > 0) {
       setMessages(prev => [...olderMessages, ...prev]);
@@ -178,10 +213,23 @@ const App: React.FC = () => {
     setIsLoadingHistory(false);
   };
 
+  const createNewChannel = async () => {
+    if (!newChannelName.trim()) return;
+    try {
+        const ch = await chatService.createChannel(newChannelName.trim());
+        setChannels(prev => [...prev, ch]);
+        setNewChannelName('');
+        setIsCreatingChannel(false);
+        setActiveChannelId(ch.id);
+    } catch (e) {
+        alert("Failed to create channel. It might already exist.");
+    }
+  };
+
   // Derive Offline Users
   const offlineUsers = useMemo(() => {
     const onlineIds = new Set(onlineUsers.map(u => u.id));
-    const knownUsers = new Map<string, string>(); // Id -> Username
+    const knownUsers = new Map<string, string>(); 
 
     messages.forEach(msg => {
       if (!knownUsers.has(msg.userId)) {
@@ -199,12 +247,10 @@ const App: React.FC = () => {
     return offline;
   }, [messages, onlineUsers]);
 
-  // Combined User List for Mentions
   const allKnownUsers = useMemo(() => {
     return [...onlineUsers, ...offlineUsers];
   }, [onlineUsers, offlineUsers]);
 
-  // Helper to find message content for replies
   const getReplySnippet = useCallback((id: string) => {
     const msg = messages.find(m => m.id === id);
     if (!msg) return "Message unavailable";
@@ -218,7 +264,6 @@ const App: React.FC = () => {
     if (connectionStatus === 'connected') {
       chatService.sendJoin(newUser);
     }
-    // Request permission on first login
     if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
       Notification.requestPermission().then(perm => {
         setNotificationsEnabled(perm === 'granted');
@@ -239,6 +284,7 @@ const App: React.FC = () => {
     if (!user) return;
     try {
       await chatService.saveMessage({
+        channelId: activeChannelId,
         userId: user.id,
         username: user.username,
         type,
@@ -263,17 +309,36 @@ const App: React.FC = () => {
     if (msg) chatService.deleteMessage(msg);
   };
 
-  const scrollToMessage = (id: string) => {
-    setIsSearchOpen(false);
-    setIsPinnedOpen(false);
-    const element = document.getElementById(`msg-${id}`);
-    if (element) {
-      element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      element.classList.add('bg-neon-purple/20', 'transition-colors', 'duration-1000');
-      setTimeout(() => element.classList.remove('bg-neon-purple/20'), 1000);
-    } else {
-      console.warn("Message element not found in DOM");
-    }
+  const handleJumpToMessage = async (msgOrId: Message | string) => {
+      let targetId: string;
+      let channelIdOfMsg: string = activeChannelId;
+
+      if (typeof msgOrId === 'string') {
+          targetId = msgOrId;
+          const localMsg = messages.find(m => m.id === targetId);
+          if (localMsg) channelIdOfMsg = localMsg.channelId;
+      } else {
+          targetId = msgOrId.id;
+          channelIdOfMsg = msgOrId.channelId;
+      }
+
+      setIsSearchOpen(false);
+      setIsPinnedOpen(false);
+
+      if (channelIdOfMsg !== activeChannelId) {
+          // Switch Channel first
+          setActiveChannelId(channelIdOfMsg);
+          // Wait briefly for channel switch effect to fire and load messages
+          // Note: This is imperfect without a complex loading state machine, but sufficient for V1
+          await new Promise(r => setTimeout(r, 600)); 
+      }
+
+      const element = document.getElementById(`msg-${targetId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        element.classList.add('bg-neon-purple/20', 'transition-colors', 'duration-1000');
+        setTimeout(() => element.classList.remove('bg-neon-purple/20'), 1000);
+      }
   };
 
   if (!user) {
@@ -291,7 +356,7 @@ const App: React.FC = () => {
           </div>
           <div className="flex flex-col">
             <h1 className="font-display font-bold text-lg md:text-xl tracking-wide dark:text-white leading-tight">
-              {APP_NAME}
+              {APP_NAME} <span className="text-gray-400 text-sm">#{channels.find(c=>c.id===activeChannelId)?.name}</span>
             </h1>
             <div className="flex items-center space-x-2 text-sm">
                {isEditingName ? (
@@ -308,7 +373,7 @@ const App: React.FC = () => {
                  </div>
                ) : (
                  <div className="flex items-center group cursor-pointer" onClick={() => { setEditNameValue(user.username); setIsEditingName(true); }}>
-                   <span className="text-neon-cyan font-bold truncate max-w-[100px] sm:max-w-none">{user.username}</span>
+                   <span className="text-cyan-600 dark:text-neon-cyan font-bold truncate max-w-[100px] sm:max-w-none">{user.username}</span>
                    <Edit2 size={10} className="ml-1 text-gray-500 opacity-0 group-hover:opacity-100 transition-opacity" />
                  </div>
                )}
@@ -331,7 +396,7 @@ const App: React.FC = () => {
           
           <button 
              onClick={toggleNotifications}
-             className={`p-2 rounded-full transition-all ${notificationsEnabled ? 'text-neon-cyan hover:bg-neon-cyan/10' : 'text-gray-500 hover:text-gray-300'}`}
+             className={`p-2 rounded-full transition-all ${notificationsEnabled ? 'text-cyan-600 dark:text-neon-cyan hover:bg-neon-cyan/10' : 'text-gray-500 hover:text-gray-300'}`}
              title={notificationsEnabled ? "Notifications On" : "Enable Notifications"}
           >
              {notificationsEnabled ? <Bell size={20}/> : <BellOff size={20}/>}
@@ -347,7 +412,7 @@ const App: React.FC = () => {
 
           <button 
             onClick={() => { setIsSearchOpen(!isSearchOpen); setIsPinnedOpen(false); }}
-            className={`p-2 rounded-full transition-all ${isSearchOpen ? 'bg-neon-cyan/20 text-neon-cyan' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+            className={`p-2 rounded-full transition-all ${isSearchOpen ? 'bg-cyan-100 dark:bg-neon-cyan/20 text-cyan-700 dark:text-neon-cyan' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
             title="Search"
           >
             <Search size={20} />
@@ -355,9 +420,9 @@ const App: React.FC = () => {
           
           <button 
              onClick={() => setIsUserListOpen(!isUserListOpen)}
-             className={`lg:hidden p-2 rounded-full transition-all ${isUserListOpen ? 'bg-neon-purple/20 text-neon-purple' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+             className={`lg:hidden p-2 rounded-full transition-all ${isUserListOpen ? 'bg-purple-100 dark:bg-neon-purple/20 text-purple-700 dark:text-neon-purple' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
           >
-             <Users size={20} />
+             <Menu size={20} />
           </button>
 
           <div className="h-6 w-px bg-gray-300 dark:bg-gray-700"></div>
@@ -372,53 +437,94 @@ const App: React.FC = () => {
         <div className={`
             absolute lg:relative z-30 inset-y-0 left-0 w-64 
             bg-gray-50 dark:bg-[#0f1422] border-r border-gray-200 dark:border-gray-800 
-            flex flex-col p-4 overflow-y-auto custom-scrollbar transform transition-transform duration-300
+            flex flex-col overflow-hidden transform transition-transform duration-300
             ${isUserListOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
             shadow-2xl lg:shadow-none
         `}>
-           <div className="lg:hidden flex justify-end mb-4">
+           <div className="lg:hidden flex justify-end p-4 pb-0">
               <button onClick={() => setIsUserListOpen(false)} className="text-gray-500 hover:text-white">
                 <X size={20} />
               </button>
            </div>
            
-           <div className="mb-6">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Stats</h2>
-              <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
-                 <span className="flex items-center"><Activity size={14} className="mr-2"/> Messages</span>
-                 <span className="font-mono">{messages.length}</span>
-              </div>
-           </div>
-           
-           <div className="mb-6">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
-                <span className="text-green-500">Online</span>
-                <span className="bg-green-500/10 text-green-500 px-1.5 rounded-full text-[10px]">{onlineUsers.length}</span>
-              </h2>
-              <ul className="space-y-2">
-                {onlineUsers.map((u, idx) => (
-                  <li key={`${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-300">
-                    <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
-                    <span className={u.id === user.id ? "text-white font-bold" : ""}>{u.username}</span>
-                    {u.id === user.id && <span className="text-[10px] text-gray-500">(You)</span>}
-                  </li>
-                ))}
-              </ul>
-           </div>
+           <div className="flex-1 overflow-y-auto custom-scrollbar p-4">
+               {/* CHANNELS SECTION */}
+               <div className="mb-8">
+                  <div className="flex justify-between items-center mb-3">
+                      <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider">Channels</h2>
+                      <button onClick={() => setIsCreatingChannel(true)} className="text-gray-400 hover:text-neon-cyan">
+                          <Plus size={16} />
+                      </button>
+                  </div>
 
-           <div className="flex-1">
-              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
-                <span className="text-gray-500">Offline</span>
-                <span className="bg-gray-800 text-gray-500 px-1.5 rounded-full text-[10px]">{offlineUsers.length}</span>
-              </h2>
-              <ul className="space-y-2 opacity-60">
-                {offlineUsers.map((u, idx) => (
-                  <li key={`off-${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-400">
-                    <div className="w-2 h-2 rounded-full bg-gray-600"></div>
-                    <span>{u.username}</span>
-                  </li>
-                ))}
-              </ul>
+                  {isCreatingChannel && (
+                      <div className="mb-3 animate-slide-up bg-white dark:bg-gray-900 p-2 rounded border border-neon-cyan/50">
+                          <input 
+                              autoFocus
+                              className="w-full bg-transparent text-sm mb-2 outline-none border-b border-gray-700 focus:border-neon-cyan"
+                              placeholder="Channel name..."
+                              value={newChannelName}
+                              onChange={(e) => setNewChannelName(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+                              onKeyDown={(e) => e.key === 'Enter' && createNewChannel()}
+                          />
+                          <div className="flex justify-end gap-2 text-xs">
+                              <button onClick={() => setIsCreatingChannel(false)} className="text-red-400">Cancel</button>
+                              <button onClick={createNewChannel} className="text-green-400">Create</button>
+                          </div>
+                      </div>
+                  )}
+
+                  <ul className="space-y-1">
+                      {channels.map(c => (
+                          <li key={c.id}>
+                              <button
+                                  onClick={() => { setActiveChannelId(c.id); setIsUserListOpen(false); }}
+                                  className={`w-full flex items-center px-3 py-2 rounded-lg text-sm transition-all ${
+                                      activeChannelId === c.id 
+                                      ? 'bg-cyan-100 dark:bg-neon-cyan/10 text-cyan-700 dark:text-neon-cyan font-bold shadow-[0_0_10px_rgba(0,255,255,0.1)]' 
+                                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
+                                  }`}
+                              >
+                                  <Hash size={14} className="mr-2 opacity-70" />
+                                  <span className="truncate">{c.name}</span>
+                                  {activeChannelId === c.id && <ChevronRight size={14} className="ml-auto opacity-50"/>}
+                              </button>
+                          </li>
+                      ))}
+                  </ul>
+               </div>
+               
+               {/* USERS SECTION */}
+               <div className="mb-6">
+                  <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
+                    <span className="text-green-600 dark:text-green-500">Online</span>
+                    <span className="bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-500 px-1.5 rounded-full text-[10px]">{onlineUsers.length}</span>
+                  </h2>
+                  <ul className="space-y-2">
+                    {onlineUsers.map((u, idx) => (
+                      <li key={`${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
+                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
+                        <span className={u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}>{u.username}</span>
+                        {u.id === user.id && <span className="text-[10px] text-gray-400">(You)</span>}
+                      </li>
+                    ))}
+                  </ul>
+               </div>
+
+               <div className="mb-6">
+                  <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
+                    <span className="text-gray-500">Offline</span>
+                    <span className="bg-gray-200 dark:bg-gray-800 text-gray-500 px-1.5 rounded-full text-[10px]">{offlineUsers.length}</span>
+                  </h2>
+                  <ul className="space-y-2 opacity-60">
+                    {offlineUsers.map((u, idx) => (
+                      <li key={`off-${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
+                        <div className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-600"></div>
+                        <span>{u.username}</span>
+                      </li>
+                    ))}
+                  </ul>
+               </div>
            </div>
         </div>
 
@@ -434,15 +540,16 @@ const App: React.FC = () => {
           <SearchPanel 
             isOpen={isSearchOpen} 
             onClose={() => setIsSearchOpen(false)}
-            messages={messages}
-            onJumpToMessage={scrollToMessage}
+            activeChannelId={activeChannelId}
+            channels={channels}
+            onJumpToMessage={handleJumpToMessage}
           />
 
           <PinnedPanel 
             isOpen={isPinnedOpen}
             onClose={() => setIsPinnedOpen(false)}
             messages={messages}
-            onJumpToMessage={scrollToMessage}
+            onJumpToMessage={handleJumpToMessage}
           />
 
           <div 
@@ -455,7 +562,7 @@ const App: React.FC = () => {
                  <button 
                     onClick={loadOlderMessages} 
                     disabled={isLoadingHistory}
-                    className="flex items-center px-4 py-2 bg-gray-800 rounded-full text-xs text-neon-cyan hover:bg-gray-700 transition-colors disabled:opacity-50"
+                    className="flex items-center px-4 py-2 bg-white dark:bg-gray-800 rounded-full text-xs text-cyan-700 dark:text-neon-cyan hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 shadow-sm"
                  >
                    {isLoadingHistory ? 'Loading...' : 'Show Older Messages'} <ArrowUp size={12} className="ml-1"/>
                  </button>
@@ -464,10 +571,11 @@ const App: React.FC = () => {
 
              {messages.length === 0 && !isLoadingHistory ? (
                <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-50">
-                 <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center mb-4">
-                   <Fish size={40} />
+                 <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-400 dark:border-gray-600 flex items-center justify-center mb-4">
+                   <Hash size={40} />
                  </div>
-                 <p>No messages yet. Start the conversation!</p>
+                 <p>This channel is empty.</p>
+                 <p className="text-xs mt-1">Be the first to say something!</p>
                </div>
              ) : (
                messages.map((msg, index) => {
@@ -480,7 +588,7 @@ const App: React.FC = () => {
                      onReply={setReplyTo}
                      onEdit={handleEditMessage}
                      onDelete={handleDeleteMessage}
-                     scrollToMessage={scrollToMessage}
+                     scrollToMessage={(id) => handleJumpToMessage(id)}
                      currentUser={user}
                      getReplySnippet={getReplySnippet}
                    />

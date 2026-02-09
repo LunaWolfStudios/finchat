@@ -20,10 +20,10 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = ({ isOpen, onClose, messa
       
       {/* Header */}
       <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900/50">
-        <h3 className="text-neon-cyan font-display font-bold flex items-center">
+        <h3 className="text-cyan-700 dark:text-neon-cyan font-display font-bold flex items-center">
           <Pin size={18} className="mr-2" /> Pinned Messages
         </h3>
-        <button onClick={onClose} className="text-gray-400 hover:text-white transition-colors">
+        <button onClick={onClose} className="text-gray-400 hover:text-gray-800 dark:hover:text-white transition-colors">
           <X size={20} />
         </button>
       </div>
@@ -39,11 +39,11 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = ({ isOpen, onClose, messa
           pinnedMessages.map(msg => (
             <div 
               key={msg.id}
-              className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-neon-cyan group transition-all relative"
+              className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-cyan-500/50 dark:hover:border-neon-cyan group transition-all relative"
             >
               {/* Message Header */}
               <div className="flex justify-between items-start mb-1">
-                <span className="font-bold text-xs text-neon-purple">{msg.username}</span>
+                <span className="font-bold text-xs text-purple-700 dark:text-neon-purple">{msg.username}</span>
                 <span className="text-[10px] text-gray-500">
                   {new Date(msg.timestamp).toLocaleDateString()}
                 </span>
@@ -63,7 +63,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = ({ isOpen, onClose, messa
               <div className="mt-3 flex justify-between items-center border-t border-gray-200 dark:border-gray-700 pt-2">
                  <button 
                     onClick={() => chatService.togglePin(msg.id)}
-                    className="text-[10px] text-gray-400 hover:text-neon-pink flex items-center transition-colors"
+                    className="text-[10px] text-gray-400 hover:text-pink-600 dark:hover:text-neon-pink flex items-center transition-colors"
                     title="Unpin"
                  >
                     <Pin size={10} className="mr-1 rotate-45" /> Unpin
@@ -71,7 +71,7 @@ export const PinnedPanel: React.FC<PinnedPanelProps> = ({ isOpen, onClose, messa
                  
                  <button 
                     onClick={() => { onJumpToMessage(msg.id); onClose(); }}
-                    className="text-xs text-neon-cyan flex items-center hover:text-white transition-colors"
+                    className="text-xs text-cyan-700 dark:text-neon-cyan flex items-center hover:text-black dark:hover:text-white transition-colors"
                  >
                     Jump <ArrowRight size={12} className="ml-1"/>
                  </button>
