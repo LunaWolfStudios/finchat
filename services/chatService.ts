@@ -1,4 +1,4 @@
-import { Message, User, ArchiveStats } from '../types';
+import { Message, User, ArchiveStats, LinkPreview } from '../types';
 import { CONFIG } from '../config';
 
 // Helper to generate UUID with fallback for insecure contexts (HTTP LAN)
@@ -110,14 +110,30 @@ class ChatService {
 
   // --- API Operations ---
 
-  async getMessages(): Promise<Message[]> {
+  async getMessages(limit = 200, before?: string): Promise<Message[]> {
     try {
-      const res = await fetch(`${CONFIG.API_URL}/messages`);
+      let url = `${CONFIG.API_URL}/messages?limit=${limit}`;
+      if (before) {
+        url += `&before=${encodeURIComponent(before)}`;
+      }
+      
+      const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch messages');
       return await res.json();
     } catch (e) {
       console.error("Could not load history:", e);
       return [];
+    }
+  }
+
+  async getLinkPreview(url: string): Promise<LinkPreview | null> {
+    try {
+      const res = await fetch(`${CONFIG.API_URL}/preview?url=${encodeURIComponent(url)}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) {
+      console.error("Preview failed", e);
+      return null;
     }
   }
 
@@ -135,7 +151,7 @@ class ChatService {
     return data.url;
   }
 
-  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted'> & { file?: File }): Promise<void> {
+  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted' | 'reactions'> & { file?: File }): Promise<void> {
     let content = message.content;
 
     // Handle File Upload if present
@@ -159,6 +175,7 @@ class ChatService {
       replyTo: message.replyTo,
       edited: false,
       deleted: false,
+      reactions: {}
     };
 
     this.sendToSocket(newMessage);
@@ -187,6 +204,13 @@ class ChatService {
   updateUser(user: User) {
     this.currentUser = user;
     this.sendToSocket({ action: 'UPDATE_USER', payload: user });
+  }
+
+  toggleReaction(messageId: string, emoji: string, userId: string) {
+    this.sendToSocket({ 
+      action: 'REACTION', 
+      payload: { messageId, emoji, userId } 
+    });
   }
 
   private sendToSocket(data: any) {

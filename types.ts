@@ -17,6 +17,7 @@ export interface Message {
   replyTo?: string; // ID of the message being replied to
   edited: boolean;
   deleted: boolean;
+  reactions?: { [emoji: string]: string[] }; // Emoji char -> Array of User IDs
 }
 
 export interface SearchFilters {
@@ -29,4 +30,12 @@ export interface SearchFilters {
 export interface ArchiveStats {
   archivedCount: number;
   lastRun: string;
+}
+
+export interface LinkPreview {
+  url: string;
+  title?: string;
+  description?: string;
+  image?: string;
+  siteName?: string;
 }

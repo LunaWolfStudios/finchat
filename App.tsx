@@ -7,7 +7,7 @@ import { ChatInput } from './components/ChatInput';
 import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu } from 'lucide-react';
+import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -16,7 +16,7 @@ const App: React.FC = () => {
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
-  const [isUserListOpen, setIsUserListOpen] = useState(false); // Mobile user list toggle
+  const [isUserListOpen, setIsUserListOpen] = useState(false);
 
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
@@ -25,8 +25,41 @@ const App: React.FC = () => {
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
 
+  // Notifications
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+
+  // Pagination
+  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
+  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
+  const initialLoadDone = useRef(false);
+
+  // Initialize Notification Permission State
+  useEffect(() => {
+    if ('Notification' in window && Notification.permission === 'granted') {
+      setNotificationsEnabled(true);
+    }
+  }, []);
+
+  const requestNotifications = async () => {
+    if (!('Notification' in window)) return;
+    const permission = await Notification.requestPermission();
+    if (permission === 'granted') {
+      setNotificationsEnabled(true);
+    } else {
+      setNotificationsEnabled(false);
+    }
+  };
+
+  const toggleNotifications = () => {
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false);
+    } else {
+      requestNotifications();
+    }
+  };
 
   // Initialize App
   useEffect(() => {
@@ -36,10 +69,18 @@ const App: React.FC = () => {
       setUser(JSON.parse(storedUser));
     }
 
-    // 2. Load Initial History
+    // 2. Load Initial History (200 latest)
     const fetchHistory = async () => {
-      const history = await chatService.getMessages();
+      setIsLoadingHistory(true);
+      const history = await chatService.getMessages(200);
       setMessages(history);
+      setIsLoadingHistory(false);
+      initialLoadDone.current = true;
+      
+      // Initial Scroll to bottom
+      setTimeout(() => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
+      }, 100);
     };
     fetchHistory();
 
@@ -47,6 +88,15 @@ const App: React.FC = () => {
     const unsubscribe = chatService.subscribe(
       (newMessage) => {
         setMessages(prev => [...prev, newMessage]);
+        // Trigger notification if mentioned
+        if (user && notificationsEnabled && newMessage.userId !== user.id) {
+          if (newMessage.content.includes(`@${user.username}`)) {
+             new Notification(`${newMessage.username} mentioned you in ${APP_NAME}`, {
+               body: newMessage.content,
+               icon: '/fish-icon.png' // Placeholder if available
+             });
+          }
+        }
       },
       (status) => {
         setConnectionStatus(status);
@@ -65,12 +115,32 @@ const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [user?.id]); // Re-subscribe if user ID changes (unlikely) but safer
+  }, [user?.id, notificationsEnabled]); // Re-subscribe if user/notif changes
 
-  // Scroll to bottom on new message
+  // Auto-scroll logic: only if user is already near bottom
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (initialLoadDone.current) {
+        // Simple heuristic: always scroll to bottom on new message unless user scrolled way up?
+        // For simplicity as requested: "Start scroll view at bottom... " usually implies sticky bottom
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages.length]);
+
+  const loadOlderMessages = async () => {
+    if (messages.length === 0 || isLoadingHistory) return;
+    
+    setIsLoadingHistory(true);
+    const oldestTimestamp = messages[0].timestamp;
+    
+    const olderMessages = await chatService.getMessages(200, oldestTimestamp);
+    
+    if (olderMessages.length > 0) {
+      setMessages(prev => [...olderMessages, ...prev]);
+    } else {
+      setHasMoreHistory(false);
+    }
+    setIsLoadingHistory(false);
+  };
 
   // Derive Offline Users
   const offlineUsers = useMemo(() => {
@@ -78,12 +148,9 @@ const App: React.FC = () => {
     const knownUsers = new Map<string, string>(); // Id -> Username
 
     messages.forEach(msg => {
-      // If we haven't seen this user ID yet, add them
       if (!knownUsers.has(msg.userId)) {
         knownUsers.set(msg.userId, msg.username);
       }
-      // If we have seen them, but the message is newer/different username, update it (optional, but good for keeping names fresh)
-      // For V1, simple set is fine.
     });
 
     const offline: User[] = [];
@@ -101,7 +168,6 @@ const App: React.FC = () => {
     const newUser: User = { id: generateUUID(), username };
     localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
     setUser(newUser);
-    // Connection might be open already, send join
     if (connectionStatus === 'connected') {
       chatService.sendJoin(newUser);
     }
@@ -118,7 +184,6 @@ const App: React.FC = () => {
 
   const handleSendMessage = async (content: string, type: MessageType, file?: File) => {
     if (!user) return;
-    
     try {
       await chatService.saveMessage({
         userId: user.id,
@@ -146,13 +211,10 @@ const App: React.FC = () => {
   };
 
   const scrollToMessage = (id: string) => {
-    // Close search panel when jumping
     setIsSearchOpen(false);
-    
     const element = document.getElementById(`msg-${id}`);
     if (element) {
       element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-      // Highlight effect
       element.classList.add('bg-neon-purple/20', 'transition-colors', 'duration-1000');
       setTimeout(() => element.classList.remove('bg-neon-purple/20'), 1000);
     } else {
@@ -177,8 +239,6 @@ const App: React.FC = () => {
             <h1 className="font-display font-bold text-lg md:text-xl tracking-wide dark:text-white leading-tight">
               {APP_NAME}
             </h1>
-            
-            {/* Username Display / Edit */}
             <div className="flex items-center space-x-2 text-sm">
                {isEditingName ? (
                  <div className="flex items-center bg-gray-100 dark:bg-black/50 rounded px-1">
@@ -216,13 +276,20 @@ const App: React.FC = () => {
           </div>
           
           <button 
+             onClick={toggleNotifications}
+             className={`p-2 rounded-full transition-all ${notificationsEnabled ? 'text-neon-cyan hover:bg-neon-cyan/10' : 'text-gray-500 hover:text-gray-300'}`}
+             title={notificationsEnabled ? "Notifications On" : "Enable Notifications"}
+          >
+             {notificationsEnabled ? <Bell size={20}/> : <BellOff size={20}/>}
+          </button>
+
+          <button 
             onClick={() => setIsSearchOpen(!isSearchOpen)}
             className={`p-2 rounded-full transition-all ${isSearchOpen ? 'bg-neon-cyan/20 text-neon-cyan' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
           >
             <Search size={20} />
           </button>
           
-          {/* Mobile User List Toggle */}
           <button 
              onClick={() => setIsUserListOpen(!isUserListOpen)}
              className={`lg:hidden p-2 rounded-full transition-all ${isUserListOpen ? 'bg-neon-purple/20 text-neon-purple' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
@@ -238,7 +305,7 @@ const App: React.FC = () => {
       {/* Main Layout */}
       <div className="flex-1 overflow-hidden relative flex">
         
-        {/* Sidebar (Responsive) */}
+        {/* Sidebar */}
         <div className={`
             absolute lg:relative z-30 inset-y-0 left-0 w-64 
             bg-gray-50 dark:bg-[#0f1422] border-r border-gray-200 dark:border-gray-800 
@@ -246,14 +313,12 @@ const App: React.FC = () => {
             ${isUserListOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
             shadow-2xl lg:shadow-none
         `}>
-           {/* Close Button Mobile */}
            <div className="lg:hidden flex justify-end mb-4">
               <button onClick={() => setIsUserListOpen(false)} className="text-gray-500 hover:text-white">
                 <X size={20} />
               </button>
            </div>
-
-           {/* Stats */}
+           
            <div className="mb-6">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Stats</h2>
               <div className="flex items-center justify-between text-sm text-gray-400 mb-2">
@@ -262,7 +327,6 @@ const App: React.FC = () => {
               </div>
            </div>
            
-           {/* Online Users */}
            <div className="mb-6">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
                 <span className="text-green-500">Online</span>
@@ -276,13 +340,9 @@ const App: React.FC = () => {
                     {u.id === user.id && <span className="text-[10px] text-gray-500">(You)</span>}
                   </li>
                 ))}
-                {onlineUsers.length === 0 && (
-                  <li className="text-xs text-gray-500 italic">Connecting...</li>
-                )}
               </ul>
            </div>
 
-           {/* Offline Users */}
            <div className="flex-1">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
                 <span className="text-gray-500">Offline</span>
@@ -295,14 +355,10 @@ const App: React.FC = () => {
                     <span>{u.username}</span>
                   </li>
                 ))}
-                {offlineUsers.length === 0 && (
-                  <li className="text-xs text-gray-600 italic">No offline history</li>
-                )}
               </ul>
            </div>
         </div>
 
-        {/* Overlay for Mobile Sidebar */}
         {isUserListOpen && (
           <div 
             className="fixed inset-0 bg-black/50 z-20 lg:hidden"
@@ -310,7 +366,6 @@ const App: React.FC = () => {
           />
         )}
 
-        {/* Message Feed Container */}
         <div className="flex-1 flex flex-col relative min-w-0">
           
           <SearchPanel 
@@ -320,16 +375,24 @@ const App: React.FC = () => {
             onJumpToMessage={scrollToMessage}
           />
 
-          {/* Chat Messages */}
           <div 
             ref={scrollContainerRef}
             className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar bg-gray-100 dark:bg-transparent"
           >
-             {connectionStatus === 'connecting' && messages.length === 0 ? (
-                <div className="flex justify-center items-center h-full text-neon-cyan animate-pulse">
-                  Connecting to server...
-                </div>
-             ) : messages.length === 0 ? (
+             {/* Load Older Button */}
+             {hasMoreHistory && (
+               <div className="flex justify-center mb-4">
+                 <button 
+                    onClick={loadOlderMessages} 
+                    disabled={isLoadingHistory}
+                    className="flex items-center px-4 py-2 bg-gray-800 rounded-full text-xs text-neon-cyan hover:bg-gray-700 transition-colors disabled:opacity-50"
+                 >
+                   {isLoadingHistory ? 'Loading...' : 'Show Older Messages'} <ArrowUp size={12} className="ml-1"/>
+                 </button>
+               </div>
+             )}
+
+             {messages.length === 0 && !isLoadingHistory ? (
                <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-50">
                  <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-600 flex items-center justify-center mb-4">
                    <Fish size={40} />
@@ -348,6 +411,7 @@ const App: React.FC = () => {
                      onEdit={handleEditMessage}
                      onDelete={handleDeleteMessage}
                      scrollToMessage={scrollToMessage}
+                     currentUser={user}
                    />
                  );
                })
@@ -355,12 +419,12 @@ const App: React.FC = () => {
              <div ref={messagesEndRef} />
           </div>
 
-          {/* Input Area - pb-safe handles iPhone Home bar */}
           <div className="flex-none pb-safe bg-white dark:bg-gray-900">
             <ChatInput 
               onSendMessage={handleSendMessage}
               replyTo={replyTo}
               onCancelReply={() => setReplyTo(null)}
+              onlineUsers={onlineUsers}
             />
           </div>
         </div>

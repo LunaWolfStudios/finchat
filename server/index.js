@@ -76,9 +76,30 @@ const saveAllMessages = (messages) => {
 
 // --- HTTP ENDPOINTS ---
 
+// Paginated Messages
 app.get('/messages', (req, res) => {
-  const messages = getMessages();
-  res.json(messages);
+  const allMessages = getMessages();
+  const limit = parseInt(req.query.limit) || 200;
+  const before = req.query.before;
+
+  let result = allMessages;
+
+  // Sort by time descending first to easily grab chunks
+  // (Assuming stored as oldest -> newest, so we reverse to find 'before')
+  // Actually, let's keep array order (Oldest -> Newest) and slice.
+  
+  if (before) {
+    const index = allMessages.findIndex(m => m.timestamp === before || m.timestamp >= before);
+    // If we found a message at that time, we want messages BEFORE it.
+    // If index is -1 (not found) or 0, we might send nothing or check logic.
+    // Simple logic: filter where timestamp < before.
+    result = allMessages.filter(m => m.timestamp < before);
+  }
+
+  // Take the LAST 'limit' items from the result
+  const slice = result.slice(-limit);
+  
+  res.json(slice);
 });
 
 app.post('/upload', upload.single('file'), (req, res) => {
@@ -87,6 +108,41 @@ app.post('/upload', upload.single('file'), (req, res) => {
   }
   const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
   res.json({ url: fileUrl, filename: req.file.filename });
+});
+
+// Link Preview Endpoint
+app.get('/preview', async (req, res) => {
+  const targetUrl = req.query.url;
+  if (!targetUrl) return res.status(400).json({ error: 'Missing url' });
+
+  try {
+    // Simple fetch with User-Agent to avoid some bot blockers
+    const response = await fetch(targetUrl, {
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (compatible; FinChatBot/1.0;)'
+      }
+    });
+    
+    if (!response.ok) throw new Error('Failed to fetch');
+    const html = await response.text();
+
+    // Basic Regex Parsing for OG Tags
+    const getMetaContent = (prop) => {
+      const regex = new RegExp(`<meta\\s+(?:property|name)=["']${prop}["']\\s+content=["'](.*?)["']`, 'i');
+      const match = html.match(regex);
+      return match ? match[1] : null;
+    };
+
+    const title = getMetaContent('og:title') || getMetaContent('twitter:title') || html.match(/<title>(.*?)<\/title>/i)?.[1];
+    const description = getMetaContent('og:description') || getMetaContent('twitter:description') || getMetaContent('description');
+    const image = getMetaContent('og:image') || getMetaContent('twitter:image');
+    const siteName = getMetaContent('og:site_name');
+
+    res.json({ url: targetUrl, title, description, image, siteName });
+  } catch (e) {
+    console.error("Preview fetch error:", e);
+    res.status(500).json({ error: 'Could not fetch preview' });
+  }
 });
 
 // --- WEBSOCKET SERVER ---
@@ -125,14 +181,12 @@ wss.on('connection', (ws) => {
       if (message.action === 'JOIN') {
         clients.set(ws, message.payload);
         broadcastUserList();
-        return; // Don't broadcast JOIN as a chat message
+        return; 
       }
 
       if (message.action === 'UPDATE_USER') {
         clients.set(ws, message.payload);
         broadcastUserList();
-        // Optionally update historical messages for this user? 
-        // For V1, we keep history as is (immutable identity snapshot)
         return;
       }
 
@@ -140,23 +194,52 @@ wss.on('connection', (ws) => {
         const payload = message.payload;
         const index = currentMessages.findIndex(m => m.id === payload.id);
         if (index !== -1) {
-          currentMessages[index] = payload;
+          // Preserve reactions if any, as payload might not have them if edited from client state loosely
+          const oldMsg = currentMessages[index];
+          currentMessages[index] = { ...oldMsg, ...payload, reactions: oldMsg.reactions };
           saveAllMessages(currentMessages);
-          broadcastMsg = { type: 'UPDATE_MESSAGE', payload: payload };
+          broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
         }
       } 
       else if (message.action === 'DELETE') {
         const payload = message.payload;
         const index = currentMessages.findIndex(m => m.id === payload.id);
         if (index !== -1) {
-          currentMessages[index] = payload; // Payload should have deleted: true
+          currentMessages[index] = { ...currentMessages[index], deleted: true, content: 'Message deleted', type: 'text' };
           saveAllMessages(currentMessages);
-          broadcastMsg = { type: 'UPDATE_MESSAGE', payload: payload };
+          broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
         }
-      } 
+      }
+      else if (message.action === 'REACTION') {
+        const { messageId, emoji, userId } = message.payload;
+        const index = currentMessages.findIndex(m => m.id === messageId);
+        
+        if (index !== -1) {
+          const msg = currentMessages[index];
+          if (!msg.reactions) msg.reactions = {};
+          
+          if (!msg.reactions[emoji]) msg.reactions[emoji] = [];
+          
+          const users = msg.reactions[emoji];
+          const userIdx = users.indexOf(userId);
+          
+          if (userIdx === -1) {
+            // Add reaction
+            users.push(userId);
+          } else {
+            // Remove reaction (toggle)
+            users.splice(userIdx, 1);
+            if (users.length === 0) delete msg.reactions[emoji];
+          }
+          
+          saveAllMessages(currentMessages);
+          broadcastMsg = { type: 'UPDATE_MESSAGE', payload: msg };
+        }
+      }
       else {
         // New Message (Standard)
         if (!message.timestamp) message.timestamp = new Date().toISOString();
+        if (!message.reactions) message.reactions = {};
         
         currentMessages.push(message);
         saveAllMessages(currentMessages);
