@@ -438,7 +438,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
           
           {/* Username & Timestamp */}
           <div className="flex items-center space-x-2 mb-1 px-1">
-            <span className={`text-xs font-display font-bold ${isOwnMessage ? 'text-neon-cyan' : 'text-neon-purple'}`}>
+            <span className={`text-xs font-display font-bold ${isOwnMessage ? 'text-cyan-600 dark:text-neon-cyan' : 'text-purple-600 dark:text-neon-purple'}`}>
               {message.username}
             </span>
             <span className="text-[10px] text-gray-500 dark:text-gray-400">
@@ -576,7 +576,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                     className={`
                       text-xs px-1.5 py-0.5 rounded-full border flex items-center gap-1 transition-colors
                       ${currentUser && userIds.includes(currentUser.id) 
-                        ? 'bg-neon-cyan/20 border-neon-cyan text-neon-cyan' 
+                        ? 'bg-cyan-100 dark:bg-neon-cyan/20 border-cyan-500 dark:border-neon-cyan text-cyan-700 dark:text-neon-cyan' 
                         : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
                       }
                     `}
@@ -625,8 +625,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
               {/* Default Reaction Grid */}
               <div className="text-[10px] text-gray-500 mb-1">All</div>
-              <div className="grid grid-cols-6 gap-2 mb-4">
-                 {DEFAULT_EMOJIS.slice(0, 12).map(emoji => (
+              <div className="grid grid-cols-6 gap-2 mb-4 max-h-48 overflow-y-auto">
+                 {DEFAULT_EMOJIS.map(emoji => (
                     <button 
                       key={emoji} 
                       onClick={() => handleEmojiSelect(emoji)}
