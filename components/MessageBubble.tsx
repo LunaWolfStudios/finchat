@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Message, LinkPreview, User } from '../types';
-import { Edit2, Trash2, Reply, ExternalLink, Smile, Plus } from 'lucide-react';
+import { Edit2, Trash2, Reply, ExternalLink, Smile, X } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface MessageBubbleProps {
@@ -30,19 +30,21 @@ const LinkPreviewCard: React.FC<{ url: string }> = ({ url }) => {
     return () => { mounted = false; };
   }, [url]);
 
-  if (loading) return null; // Don't show anything while loading to avoid jump
-  if (!data || (!data.title && !data.image)) return null; // No useful data
+  if (loading) return null; 
+  if (!data || (!data.title && !data.image)) return null; 
 
   return (
     <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-2 max-w-sm rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 hover:border-neon-cyan transition-colors">
       {data.image && (
-        <div className="h-32 w-full overflow-hidden relative">
+        <div className="h-32 w-full overflow-hidden relative bg-black/50">
            <img src={data.image} alt={data.title} className="w-full h-full object-cover" />
-           <div className="absolute bottom-1 right-1 bg-black/70 px-1 rounded text-[10px] text-white uppercase">{data.siteName || 'Link'}</div>
+           <div className="absolute bottom-1 right-1 bg-black/70 px-1 rounded text-[10px] text-white uppercase font-bold tracking-wider">
+             {data.siteName || new URL(url).hostname.replace('www.', '')}
+           </div>
         </div>
       )}
       <div className="p-3">
-        {data.title && <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-1">{data.title}</h4>}
+        {data.title && <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-tight">{data.title}</h4>}
         {data.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{data.description}</p>}
       </div>
     </a>
@@ -159,18 +161,55 @@ const RichTextRenderer: React.FC<{ content: string }> = ({ content }) => {
   );
 };
 
-// --- Reactions Component ---
-const COMMON_EMOJIS = ['👍', '❤️', '😂', '😮', '😢', '🔥'];
+// --- Emoji Picker ---
+const DEFAULT_EMOJIS = [
+  '👍', '👎', '❤️', '🔥', '😂', '😮', '😢', '🎉', 
+  '🚀', '🤘', '💯', '👀', '🙌', '💀', '💩', '🤡',
+  '❗', '❓', '✨', '⚡', '🧠', '🧊', '🤝', '🌮', 
+  '🎵', '🎮', '👾', '🌈', '✅', '❌'
+];
 
 const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () => void }> = ({ onSelect, onClose }) => {
+  const [recents, setRecents] = useState<string[]>([]);
+
+  useEffect(() => {
+    const stored = localStorage.getItem('finchat_recent_emojis');
+    if (stored) setRecents(JSON.parse(stored));
+  }, []);
+
+  const handleSelect = (emoji: string) => {
+    // Update recents
+    const newRecents = [emoji, ...recents.filter(e => e !== emoji)].slice(0, 8);
+    localStorage.setItem('finchat_recent_emojis', JSON.stringify(newRecents));
+    setRecents(newRecents);
+    
+    onSelect(emoji);
+    onClose();
+  };
+
   return (
-    <div className="absolute bottom-full mb-1 left-0 bg-gray-800 border border-gray-600 rounded-lg p-2 shadow-xl flex gap-1 z-50">
-      {COMMON_EMOJIS.map(e => (
-        <button key={e} onClick={() => { onSelect(e); onClose(); }} className="hover:bg-white/20 p-1 rounded transition">
-          {e}
-        </button>
-      ))}
-      <button onClick={onClose} className="text-gray-400 ml-1"><XIcon size={14}/></button>
+    <div className="absolute bottom-full mb-1 -left-2 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up">
+      <div className="flex justify-between items-center mb-2 pb-1 border-b border-gray-700">
+        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Reactions</span>
+        <button onClick={onClose} className="text-gray-400 hover:text-white"><XIcon size={14}/></button>
+      </div>
+      
+      {recents.length > 0 && (
+        <div className="mb-2">
+           <span className="text-[10px] text-gray-500 mb-1 block">Recently Used</span>
+           <div className="grid grid-cols-8 gap-1">
+             {recents.map(e => (
+               <button key={e} onClick={() => handleSelect(e)} className="hover:bg-white/20 rounded p-1 text-base transition">{e}</button>
+             ))}
+           </div>
+        </div>
+      )}
+      
+      <div className="grid grid-cols-8 gap-1">
+        {DEFAULT_EMOJIS.map(e => (
+          <button key={e} onClick={() => handleSelect(e)} className="hover:bg-white/20 rounded p-1 text-base transition">{e}</button>
+        ))}
+      </div>
     </div>
   );
 };
@@ -201,6 +240,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (!currentUser) return;
     chatService.toggleReaction(message.id, emoji, currentUser.id);
   };
+
+  const isMentioned = currentUser && !isOwnMessage && message.content.includes(`@${currentUser.username}`);
 
   const renderContent = () => {
     if (message.deleted) {
@@ -270,6 +311,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-gray-900 dark:text-gray-100 rounded-tr-sm' 
             : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
           }
+          ${isMentioned ? 'bg-yellow-500/10 border-l-4 border-l-yellow-500' : ''}
           ${isHovered ? 'shadow-lg' : ''}
         `}>
           {isEditing ? (

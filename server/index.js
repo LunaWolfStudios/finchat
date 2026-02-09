@@ -84,14 +84,7 @@ app.get('/messages', (req, res) => {
 
   let result = allMessages;
 
-  // Sort by time descending first to easily grab chunks
-  // (Assuming stored as oldest -> newest, so we reverse to find 'before')
-  // Actually, let's keep array order (Oldest -> Newest) and slice.
-  
   if (before) {
-    const index = allMessages.findIndex(m => m.timestamp === before || m.timestamp >= before);
-    // If we found a message at that time, we want messages BEFORE it.
-    // If index is -1 (not found) or 0, we might send nothing or check logic.
     // Simple logic: filter where timestamp < before.
     result = allMessages.filter(m => m.timestamp < before);
   }
@@ -116,32 +109,36 @@ app.get('/preview', async (req, res) => {
   if (!targetUrl) return res.status(400).json({ error: 'Missing url' });
 
   try {
-    // Simple fetch with User-Agent to avoid some bot blockers
+    // Use Discordbot User-Agent to encourage sites (X, IG) to return OpenGraph tags
     const response = await fetch(targetUrl, {
       headers: {
-        'User-Agent': 'Mozilla/5.0 (compatible; FinChatBot/1.0;)'
+        'User-Agent': 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'
       }
     });
     
     if (!response.ok) throw new Error('Failed to fetch');
     const html = await response.text();
 
-    // Basic Regex Parsing for OG Tags
+    // Robust Regex Parsing for OG and Twitter Tags
     const getMetaContent = (prop) => {
-      const regex = new RegExp(`<meta\\s+(?:property|name)=["']${prop}["']\\s+content=["'](.*?)["']`, 'i');
+      // Matches <meta property="og:title" content="..."> OR <meta name="twitter:title" content="...">
+      // Also handles inconsistent quoting and spacing
+      const regex = new RegExp(`<meta\\s+(?:property|name)=["'](?:og:|twitter:)?${prop}["']\\s+content=["'](.*?)["']`, 'i');
       const match = html.match(regex);
       return match ? match[1] : null;
     };
 
-    const title = getMetaContent('og:title') || getMetaContent('twitter:title') || html.match(/<title>(.*?)<\/title>/i)?.[1];
-    const description = getMetaContent('og:description') || getMetaContent('twitter:description') || getMetaContent('description');
-    const image = getMetaContent('og:image') || getMetaContent('twitter:image');
-    const siteName = getMetaContent('og:site_name');
+    // Fallback regex for title tag
+    const title = getMetaContent('title') || html.match(/<title>(.*?)<\/title>/i)?.[1];
+    const description = getMetaContent('description');
+    const image = getMetaContent('image') || getMetaContent('image:src');
+    const siteName = getMetaContent('site_name');
 
     res.json({ url: targetUrl, title, description, image, siteName });
   } catch (e) {
     console.error("Preview fetch error:", e);
-    res.status(500).json({ error: 'Could not fetch preview' });
+    // Return empty success so UI just handles it as no-preview rather than crashing
+    res.json({ url: targetUrl });
   }
 });
 

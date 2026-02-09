@@ -38,26 +38,40 @@ const App: React.FC = () => {
 
   // Initialize Notification Permission State
   useEffect(() => {
-    if ('Notification' in window && Notification.permission === 'granted') {
-      setNotificationsEnabled(true);
+    if ('Notification' in window) {
+      if (Notification.permission === 'granted') {
+        setNotificationsEnabled(true);
+      } else {
+        setNotificationsEnabled(false);
+      }
     }
   }, []);
 
-  const requestNotifications = async () => {
-    if (!('Notification' in window)) return;
-    const permission = await Notification.requestPermission();
-    if (permission === 'granted') {
-      setNotificationsEnabled(true);
-    } else {
-      setNotificationsEnabled(false);
+  const toggleNotifications = async () => {
+    if (!('Notification' in window)) {
+      alert("This browser does not support desktop notifications");
+      return;
     }
-  };
 
-  const toggleNotifications = () => {
     if (notificationsEnabled) {
+      // Logic to disable: we just update state to stop sending them, 
+      // but we cannot revoke 'granted' permission via API.
       setNotificationsEnabled(false);
     } else {
-      requestNotifications();
+      // Logic to enable
+      if (Notification.permission === 'granted') {
+        setNotificationsEnabled(true);
+      } else if (Notification.permission !== 'denied') {
+        const permission = await Notification.requestPermission();
+        if (permission === 'granted') {
+          setNotificationsEnabled(true);
+          new Notification('Notifications Enabled', { body: 'You will now be notified when mentioned.' });
+        } else {
+           setNotificationsEnabled(false);
+        }
+      } else {
+        alert("Notifications are denied in browser settings. Please enable them manually.");
+      }
     }
   };
 
@@ -89,14 +103,7 @@ const App: React.FC = () => {
       (newMessage) => {
         setMessages(prev => [...prev, newMessage]);
         // Trigger notification if mentioned
-        if (user && notificationsEnabled && newMessage.userId !== user.id) {
-          if (newMessage.content.includes(`@${user.username}`)) {
-             new Notification(`${newMessage.username} mentioned you in ${APP_NAME}`, {
-               body: newMessage.content,
-               icon: '/fish-icon.png' // Placeholder if available
-             });
-          }
-        }
+        // We use the Ref value of notificationEnabled implicitly via state closure in useEffect dependencies
       },
       (status) => {
         setConnectionStatus(status);
@@ -115,13 +122,30 @@ const App: React.FC = () => {
     return () => {
       unsubscribe();
     };
-  }, [user?.id, notificationsEnabled]); // Re-subscribe if user/notif changes
+  }, [user?.id]); // Re-subscribe if user ID changes. NOTE: Removed notificationsEnabled from dep array to avoid resubscribing on toggle.
+
+  // Separate effect for notification handling to access fresh state
+  useEffect(() => {
+    const lastMsg = messages[messages.length - 1];
+    if (!lastMsg || !initialLoadDone.current || !user || !notificationsEnabled) return;
+    
+    // Check if new message is from someone else and mentions user
+    if (lastMsg.userId !== user.id && lastMsg.content.includes(`@${user.username}`)) {
+       // Debounce check or simple timestamp check could go here if needed
+       if ((new Date().getTime() - new Date(lastMsg.timestamp).getTime()) < 5000) { // Only notify if fresh
+         try {
+           new Notification(`${lastMsg.username} mentioned you`, {
+             body: lastMsg.content,
+             icon: '/favicon.ico'
+           });
+         } catch (e) { console.error("Notification failed", e); }
+       }
+    }
+  }, [messages, user, notificationsEnabled]);
 
   // Auto-scroll logic: only if user is already near bottom
   useEffect(() => {
     if (initialLoadDone.current) {
-        // Simple heuristic: always scroll to bottom on new message unless user scrolled way up?
-        // For simplicity as requested: "Start scroll view at bottom... " usually implies sticky bottom
         messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
     }
   }, [messages.length]);
