@@ -23,6 +23,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
 
+  // Auto-focus input when replying
+  useEffect(() => {
+    if (replyTo && textInputRef.current) {
+      textInputRef.current.focus();
+    }
+  }, [replyTo]);
+
   const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;

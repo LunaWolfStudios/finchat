@@ -238,10 +238,10 @@ const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () 
   };
 
   return (
-    <div className="absolute bottom-full mb-2 bg-gray-900 border border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up">
-      <div className="flex justify-between items-center mb-2 pb-1 border-b border-gray-700">
-        <span className="text-[10px] uppercase font-bold text-gray-400 tracking-wider">Reactions</span>
-        <button onClick={onClose} className="text-gray-400 hover:text-white"><XIcon size={14}/></button>
+    <div className="absolute bottom-full mb-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up">
+      <div className="flex justify-between items-center mb-2 pb-1 border-b border-gray-200 dark:border-gray-700">
+        <span className="text-[10px] uppercase font-bold text-gray-500 dark:text-gray-400 tracking-wider">Reactions</span>
+        <button onClick={onClose} className="text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white"><XIcon size={14}/></button>
       </div>
       
       {recents.length > 0 && (
@@ -249,7 +249,7 @@ const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () 
            <span className="text-[10px] text-gray-500 mb-1 block">Recently Used</span>
            <div className="grid grid-cols-8 gap-1">
              {recents.map(e => (
-               <button key={e} onClick={() => handleSelect(e)} className="hover:bg-white/20 rounded p-1 text-base transition">{e}</button>
+               <button key={e} onClick={() => handleSelect(e)} className="hover:bg-gray-100 dark:hover:bg-white/20 rounded p-1 text-base transition">{e}</button>
              ))}
            </div>
         </div>
@@ -257,7 +257,7 @@ const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () 
       
       <div className="grid grid-cols-8 gap-1">
         {DEFAULT_EMOJIS.map(e => (
-          <button key={e} onClick={() => handleSelect(e)} className="hover:bg-white/20 rounded p-1 text-base transition">{e}</button>
+          <button key={e} onClick={() => handleSelect(e)} className="hover:bg-gray-100 dark:hover:bg-white/20 rounded p-1 text-base transition">{e}</button>
         ))}
       </div>
     </div>
@@ -506,23 +506,23 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 transition-opacity duration-200 z-10 
                 ${isHovered || showReactionPicker ? 'opacity-100' : 'opacity-0 pointer-events-none'}
               `}>
-                <div className="flex items-center gap-1 bg-gray-900/95 border border-gray-700 rounded-lg p-1.5 shadow-xl backdrop-blur-sm">
+                <div className="flex items-center gap-1 bg-white/95 dark:bg-gray-900/95 border border-gray-200 dark:border-gray-700 rounded-lg p-1.5 shadow-xl backdrop-blur-sm">
                   {/* Quick Reactions */}
                   {recentEmojis.map(emoji => (
                     <button 
                       key={emoji}
                       onClick={() => handleEmojiSelect(emoji)}
-                      className="p-1 hover:bg-white/10 rounded text-base transition-colors min-w-[24px] flex items-center justify-center"
+                      className="p-1 hover:bg-gray-100 dark:hover:bg-white/10 rounded text-base transition-colors min-w-[24px] flex items-center justify-center"
                       title={emoji}
                     >
                       {emoji}
                     </button>
                   ))}
 
-                  {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-700 mx-0.5"></div>}
+                  {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-0.5"></div>}
 
                   <div className="relative">
-                    <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-400 text-gray-400" title="React">
+                    <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-600 dark:hover:text-yellow-400 text-gray-500 dark:text-gray-400" title="React">
                       <Smile size={16} />
                     </button>
                     {showReactionPicker && (
@@ -531,20 +531,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   </div>
                   <button 
                     onClick={() => onReply(message)} 
-                    className="p-1 hover:text-neon-cyan text-gray-400" 
+                    className="p-1 hover:text-cyan-600 dark:hover:text-neon-cyan text-gray-500 dark:text-gray-400" 
                     title="Reply"
                   >
                     <Reply size={16} />
                   </button>
                   
-                  <button onClick={handleCopy} className="p-1 hover:text-green-400 text-gray-400" title="Copy">
+                  <button onClick={handleCopy} className="p-1 hover:text-green-600 dark:hover:text-green-400 text-gray-500 dark:text-gray-400" title="Copy">
                       {isCopied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
                   </button>
 
                   {isOwnMessage && message.type === 'text' && (
                     <button 
                       onClick={() => setIsEditing(true)} 
-                      className="p-1 hover:text-neon-purple text-gray-400" 
+                      className="p-1 hover:text-purple-600 dark:hover:text-neon-purple text-gray-500 dark:text-gray-400" 
                       title="Edit"
                     >
                       <Edit2 size={16} />
@@ -553,7 +553,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {isOwnMessage && (
                     <button 
                       onClick={() => onDelete(message.id)} 
-                      className="p-1 hover:text-neon-pink text-gray-400" 
+                      className="p-1 hover:text-pink-600 dark:hover:text-neon-pink text-gray-500 dark:text-gray-400" 
                       title="Delete"
                     >
                       <Trash2 size={16} />
