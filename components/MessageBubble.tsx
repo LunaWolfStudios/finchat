@@ -1,6 +1,6 @@
 import React, { useState, useEffect } from 'react';
 import { Message, LinkPreview, User } from '../types';
-import { Edit2, Trash2, Reply, ExternalLink, Smile, X } from 'lucide-react';
+import { Edit2, Trash2, Reply, ExternalLink, Smile, X, MoreVertical } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface MessageBubbleProps {
@@ -92,7 +92,7 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
                     href={cleanUrl} 
                     target="_blank" 
                     rel="noopener noreferrer" 
-                    className="text-neon-cyan underline hover:text-white break-all inline-flex items-center"
+                    className="text-blue-600 dark:text-neon-cyan underline hover:text-blue-800 dark:hover:text-white break-all inline-flex items-center"
                     onClick={(e) => e.stopPropagation()}
                   >
                     {cleanUrl} <ExternalLink size={10} className="ml-1 inline" />
@@ -108,7 +108,7 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
                       href={subPart} 
                       target="_blank" 
                       rel="noopener noreferrer" 
-                      className="text-neon-cyan underline hover:text-white break-all inline-flex items-center"
+                      className="text-blue-600 dark:text-neon-cyan underline hover:text-blue-800 dark:hover:text-white break-all inline-flex items-center"
                       onClick={(e) => e.stopPropagation()}
                     >
                       {subPart} <ExternalLink size={10} className="ml-1 inline" />
@@ -139,7 +139,19 @@ const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemove
                             if (strikePart.startsWith('~~') && strikePart.endsWith('~~') && strikePart.length > 4) {
                               return <s key={l} className="opacity-70">{strikePart.slice(2, -2)}</s>;
                             }
-                            return <span key={l}>{strikePart}</span>;
+                            
+                            // Parse Mentions (@username)
+                            const mentionParts = strikePart.split(/(@\w+)/g);
+                            return (
+                                <span key={l}>
+                                    {mentionParts.map((mPart, m) => {
+                                        if (mPart.match(/^@\w+$/)) {
+                                            return <span key={m} className="font-bold text-blue-600 dark:text-blue-400">{mPart}</span>;
+                                        }
+                                        return <span key={m}>{mPart}</span>;
+                                    })}
+                                </span>
+                            );
                          })}
                       </span>
                     )
@@ -274,9 +286,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [editContent, setEditContent] = useState(message.content);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
+  
+  // Mobile Action Toggle
+  const [showActions, setShowActions] = useState(false);
 
   useEffect(() => {
-    if (isHovered || showReactionPicker) {
+    if (isHovered || showReactionPicker || showActions) {
       const stored = localStorage.getItem('finchat_recent_emojis');
       if (stored) {
         try {
@@ -284,7 +299,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         } catch (e) {}
       }
     }
-  }, [isHovered, showReactionPicker]);
+  }, [isHovered, showReactionPicker, showActions]);
 
   const handleSaveEdit = () => {
     if (editContent.trim() !== message.content) {
@@ -296,10 +311,20 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const handleReaction = (emoji: string) => {
     if (!currentUser) return;
     chatService.toggleReaction(message.id, emoji, currentUser.id);
+    setShowActions(false);
   };
   
   const handleRemovePreview = (url: string) => {
     chatService.removePreview(message, url);
+  };
+  
+  const toggleActions = (e: React.MouseEvent) => {
+    // Don't toggle if clicking a button or link inside
+    if ((e.target as HTMLElement).tagName === 'BUTTON' || (e.target as HTMLElement).tagName === 'A') return;
+    
+    // For Desktop, we generally don't need this as hover works, but for consistency we can allow it
+    // For Mobile, this is the primary way to interact with Video bubbles
+    setShowActions(!showActions);
   };
 
   const isMentioned = currentUser && !isOwnMessage && message.content.includes(`@${currentUser.username}`);
@@ -309,9 +334,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       return <span className="italic text-gray-500">Message deleted</span>;
     }
 
+    // CHANGED: Removed max-w-sm to fix horizontal scrolling on mobile, use max-w-full
     if (message.type === 'image') {
       return (
-        <div className="relative group rounded-lg overflow-hidden border border-white/10 mt-1 max-w-sm">
+        <div className="relative group rounded-lg overflow-hidden border border-white/10 mt-1 max-w-full">
            <img src={message.content} alt="User upload" className="w-full h-auto object-cover max-h-64" />
         </div>
       );
@@ -319,7 +345,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     
     if (message.type === 'video') {
       return (
-        <div className="relative rounded-lg overflow-hidden border border-white/10 mt-1 max-w-sm">
+        <div className="relative rounded-lg overflow-hidden border border-white/10 mt-1 max-w-full">
+          {/* Video element captures clicks, so we rely on the specific 'More' button for actions */}
           <video src={message.content} controls className="w-full max-h-64 bg-black" />
         </div>
       );
@@ -327,7 +354,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
     if (message.type === 'audio') {
       return (
-         <div className="mt-1 min-w-[200px]">
+         <div className="mt-1 min-w-[200px] max-w-full">
            <audio src={message.content} controls className="w-full h-10" />
          </div>
       );
@@ -340,6 +367,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
              canEdit={isOwnMessage}
            />;
   };
+
+  // Determine if we should show actions. 
+  // Desktop: Hover works. Mobile: showActions toggle works.
+  const isActionsVisible = isHovered || showActions || showReactionPicker;
 
   return (
     <div 
@@ -371,17 +402,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         )}
 
         {/* Bubble */}
-        <div className={`
-          relative px-4 py-3 rounded-2xl shadow-md transition-all duration-200 min-w-[120px]
+        <div 
+          onClick={toggleActions}
+          className={`
+          relative px-4 py-3 rounded-2xl shadow-md transition-all duration-200 min-w-[120px] cursor-default
           ${isOwnMessage 
             ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-gray-900 dark:text-gray-100 rounded-tr-sm' 
             : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
           }
           ${isMentioned ? 'bg-yellow-500/20 dark:bg-yellow-500/10 border-2 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : ''}
-          ${isHovered ? 'shadow-lg' : ''}
+          ${isHovered || showActions ? 'shadow-lg' : ''}
         `}>
           {isEditing ? (
-            <div className="flex flex-col space-y-2 min-w-[200px]">
+            <div className="flex flex-col space-y-2 min-w-[200px]" onClick={e => e.stopPropagation()}>
               <textarea 
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
@@ -402,13 +435,32 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             </>
           )}
 
-          {/* Action Overlay */}
+          {/* Action Trigger Button (Mobile/Video Friendly) */}
           {!message.deleted && (
-            <div className={`
-              absolute -top-8 ${isOwnMessage ? 'right-0' : 'left-0'} 
-              flex items-center space-x-1 bg-gray-900/90 border border-gray-700 rounded-lg p-1.5
-              transition-opacity duration-200 z-10 shadow-lg
-              ${isHovered || showReactionPicker ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+             <button 
+               onClick={toggleActions}
+               className={`
+                 absolute bottom-1 right-1 p-1 rounded-full text-gray-400 hover:text-white hover:bg-black/20 transition-all md:hidden
+                 ${showActions ? 'bg-black/20 text-neon-cyan' : ''}
+               `}
+             >
+               <MoreVertical size={14} />
+             </button>
+          )}
+
+          {/* Action Overlay Toolbar */}
+          {!message.deleted && (
+            <div 
+              onClick={(e) => e.stopPropagation()}
+              className={`
+              absolute ${isOwnMessage ? 'right-0' : 'left-0'} 
+              /* Positioning: Desktop: Top (-8), Mobile: Bottom (Full) to prevent cutoff */
+              -bottom-10 md:-top-8 md:bottom-auto
+              
+              flex flex-wrap items-center gap-1 bg-gray-900/95 border border-gray-700 rounded-lg p-1.5
+              transition-opacity duration-200 z-20 shadow-xl backdrop-blur-sm
+              ${isActionsVisible ? 'opacity-100' : 'opacity-0 pointer-events-none'}
+              max-w-[calc(100vw-2rem)]
             `}>
               {/* Quick Reactions */}
               {recentEmojis.map(emoji => (
@@ -422,7 +474,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 </button>
               ))}
 
-              {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-700 mx-1"></div>}
+              {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-700 mx-0.5"></div>}
 
               <div className="relative">
                 <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-400 text-gray-400" title="React">
@@ -432,19 +484,39 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   <ReactionPicker onSelect={handleReaction} onClose={() => setShowReactionPicker(false)} />
                 )}
               </div>
-              <button onClick={() => onReply(message)} className="p-1 hover:text-neon-cyan text-gray-400" title="Reply">
+              <button 
+                onClick={() => { onReply(message); setShowActions(false); }} 
+                className="p-1 hover:text-neon-cyan text-gray-400" 
+                title="Reply"
+              >
                 <Reply size={16} />
               </button>
               {isOwnMessage && message.type === 'text' && (
-                <button onClick={() => setIsEditing(true)} className="p-1 hover:text-neon-purple text-gray-400" title="Edit">
+                <button 
+                  onClick={() => { setIsEditing(true); setShowActions(false); }} 
+                  className="p-1 hover:text-neon-purple text-gray-400" 
+                  title="Edit"
+                >
                   <Edit2 size={16} />
                 </button>
               )}
               {isOwnMessage && (
-                <button onClick={() => onDelete(message.id)} className="p-1 hover:text-neon-pink text-gray-400" title="Delete">
+                <button 
+                  onClick={() => { onDelete(message.id); setShowActions(false); }} 
+                  className="p-1 hover:text-neon-pink text-gray-400" 
+                  title="Delete"
+                >
                   <Trash2 size={16} />
                 </button>
               )}
+              
+              {/* Close Action (Mobile Only) */}
+              <button 
+                onClick={() => setShowActions(false)}
+                className="md:hidden p-1 text-red-400 border-l border-gray-700 ml-1"
+              >
+                <X size={14} />
+              </button>
             </div>
           )}
         </div>
