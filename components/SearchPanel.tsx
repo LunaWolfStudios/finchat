@@ -44,6 +44,11 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, messa
     setResults(filtered.reverse()); // Show newest first
   }, [query, typeFilter, messages]);
 
+  const handleJump = (id: string) => {
+    onJumpToMessage(id);
+    onClose();
+  };
+
   if (!isOpen) return null;
 
   return (
@@ -105,7 +110,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, messa
           results.map(msg => (
             <div 
               key={msg.id}
-              onClick={() => onJumpToMessage(msg.id)}
+              onClick={() => handleJump(msg.id)}
               className="p-3 rounded-lg bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 hover:border-neon-cyan cursor-pointer group transition-all"
             >
               <div className="flex justify-between items-start mb-1">

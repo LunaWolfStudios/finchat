@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Message } from '../types';
-import { Edit2, Trash2, Reply, FileText } from 'lucide-react';
+import { Edit2, Trash2, Reply, FileText, ExternalLink } from 'lucide-react';
 
 interface MessageBubbleProps {
   message: Message;
@@ -10,6 +10,131 @@ interface MessageBubbleProps {
   onDelete: (id: string) => void;
   scrollToMessage: (id: string) => void;
 }
+
+// --- Rich Text Parser Components ---
+
+const FormatInline: React.FC<{ text: string }> = ({ text }) => {
+  // Regex for parsing. Order matters: Code > Link > Bold > Strike
+  // We split the string by these patterns and return an array of React Nodes
+  
+  // 1. Split by Inline Code `...`
+  const codeParts = text.split(/(`[^`]+`)/g);
+  
+  return (
+    <>
+      {codeParts.map((part, i) => {
+        if (part.startsWith('`') && part.endsWith('`') && part.length > 2) {
+          return <code key={i} className="bg-black/30 text-neon-pink px-1.5 py-0.5 rounded text-xs font-mono mx-0.5">{part.slice(1, -1)}</code>;
+        }
+
+        // 2. Split by URLs
+        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        const urlParts = part.split(urlRegex);
+
+        return (
+          <span key={i}>
+            {urlParts.map((subPart, j) => {
+              if (subPart.match(urlRegex)) {
+                return (
+                  <a 
+                    key={j} 
+                    href={subPart} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-neon-cyan underline hover:text-white break-all inline-flex items-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {subPart} <ExternalLink size={10} className="ml-1 inline" />
+                  </a>
+                );
+              }
+
+              // 3. Split by Bold **...**
+              const boldParts = subPart.split(/(\*\*[^*]+\*\*)/g);
+              return (
+                <span key={j}>
+                  {boldParts.map((boldPart, k) => {
+                    if (boldPart.startsWith('**') && boldPart.endsWith('**') && boldPart.length > 4) {
+                      return <strong key={k} className="font-bold text-neon-purple">{boldPart.slice(2, -2)}</strong>;
+                    }
+
+                    // 4. Split by Strikethrough ~~...~~
+                    const strikeParts = boldPart.split(/(~~[^~]+~~)/g);
+                    return (
+                      <span key={k}>
+                         {strikeParts.map((strikePart, l) => {
+                            if (strikePart.startsWith('~~') && strikePart.endsWith('~~') && strikePart.length > 4) {
+                              return <s key={l} className="opacity-70">{strikePart.slice(2, -2)}</s>;
+                            }
+                            return <span key={l}>{strikePart}</span>;
+                         })}
+                      </span>
+                    )
+                  })}
+                </span>
+              );
+            })}
+          </span>
+        );
+      })}
+    </>
+  );
+};
+
+const RichTextRenderer: React.FC<{ content: string }> = ({ content }) => {
+  // 1. Handle Code Blocks first (```)
+  const codeBlocks = content.split(/(```[\s\S]*?```)/g);
+
+  return (
+    <div className="whitespace-pre-wrap break-words text-sm leading-relaxed">
+      {codeBlocks.map((block, i) => {
+        if (block.startsWith('```') && block.endsWith('```')) {
+          const codeContent = block.slice(3, -3).replace(/^\n/, ''); // Remove leading newline
+          return (
+            <pre key={i} className="bg-black/40 border border-gray-700 p-3 rounded-lg my-2 overflow-x-auto custom-scrollbar font-mono text-xs text-gray-300">
+              {codeContent}
+            </pre>
+          );
+        }
+
+        // Process Lines for Block Level Elements (Headers, Quotes)
+        const lines = block.split('\n');
+        return (
+          <span key={i}>
+            {lines.map((line, j) => {
+              const isLast = j === lines.length - 1;
+              const wrapperClass = isLast ? "" : "block min-h-[1.2em]"; // Ensure empty lines render
+
+              // Headers (# )
+              if (line.match(/^#{1,3}\s/)) {
+                const level = line.match(/^(#{1,3})/)?.[0].length || 1;
+                const text = line.replace(/^#{1,3}\s/, '');
+                const sizeClass = level === 1 ? 'text-lg font-bold border-b border-gray-700 pb-1 mb-1 mt-2' : level === 2 ? 'text-base font-bold mt-2' : 'text-sm font-bold mt-1';
+                return <div key={j} className={`${sizeClass} text-neon-cyan/90 font-display`}>{text}</div>;
+              }
+
+              // Blockquotes (> )
+              if (line.startsWith('> ')) {
+                return (
+                  <div key={j} className="border-l-4 border-neon-pink/50 pl-3 py-1 my-1 bg-neon-pink/5 text-gray-400 italic">
+                    <FormatInline text={line.slice(2)} />
+                  </div>
+                );
+              }
+
+              // Normal Text (with inline formatting)
+              return (
+                 <div key={j} className={wrapperClass}>
+                    <FormatInline text={line} />
+                 </div>
+              );
+            })}
+          </span>
+        );
+      })}
+    </div>
+  );
+};
 
 export const MessageBubble: React.FC<MessageBubbleProps> = ({ 
   message, 
@@ -59,7 +184,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       );
     }
 
-    return <p className="whitespace-pre-wrap break-words">{message.content}</p>;
+    return <RichTextRenderer content={message.content} />;
   };
 
   return (
@@ -69,7 +194,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       onMouseLeave={() => setIsHovered(false)}
       id={`msg-${message.id}`}
     >
-      <div className={`flex flex-col max-w-[85%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
+      <div className={`flex flex-col max-w-[95%] md:max-w-[70%] ${isOwnMessage ? 'items-end' : 'items-start'}`}>
         
         {/* Username & Timestamp */}
         <div className="flex items-center space-x-2 mb-1 px-1">
@@ -93,7 +218,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
 
         {/* Bubble */}
         <div className={`
-          relative px-4 py-3 rounded-2xl shadow-md transition-all duration-200
+          relative px-4 py-3 rounded-2xl shadow-md transition-all duration-200 min-w-[120px]
           ${isOwnMessage 
             ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-gray-900 dark:text-gray-100 rounded-tr-sm' 
             : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
@@ -106,7 +231,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                 value={editContent}
                 onChange={(e) => setEditContent(e.target.value)}
                 className="bg-black/20 text-sm p-2 rounded focus:outline-none focus:ring-1 focus:ring-neon-cyan w-full text-white"
-                rows={2}
+                rows={3}
               />
               <div className="flex justify-end space-x-2">
                 <button onClick={() => setIsEditing(false)} className="text-xs text-gray-400 hover:text-white">Cancel</button>
@@ -127,7 +252,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className={`
               absolute -top-3 ${isOwnMessage ? '-left-20' : '-right-20'} 
               flex items-center space-x-1 bg-gray-900/90 border border-gray-700 rounded-lg p-1
-              transition-opacity duration-200
+              transition-opacity duration-200 z-10
               ${isHovered ? 'opacity-100' : 'opacity-0 pointer-events-none'}
             `}>
               <button onClick={() => onReply(message)} className="p-1 hover:text-neon-cyan text-gray-400" title="Reply">

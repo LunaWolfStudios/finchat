@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import { Message, User, MessageType } from './types';
 import { chatService, generateUUID } from './services/chatService';
 import { STORAGE_KEY_USER, APP_NAME } from './constants';
@@ -7,17 +7,17 @@ import { ChatInput } from './components/ChatInput';
 import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X } from 'lucide-react';
+import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
-  // We no longer filter the main message list locally for display
-  // const [filteredMessages, setFilteredMessages] = useState<Message[]>([]); 
   
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
+  const [isUserListOpen, setIsUserListOpen] = useState(false); // Mobile user list toggle
+
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
   
@@ -67,11 +67,35 @@ const App: React.FC = () => {
     };
   }, [user?.id]); // Re-subscribe if user ID changes (unlikely) but safer
 
-  // Scroll to bottom on new message if user is near bottom or it's their own message
+  // Scroll to bottom on new message
   useEffect(() => {
-    // Simple logic: always scroll to bottom on new message for V1
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages.length]);
+
+  // Derive Offline Users
+  const offlineUsers = useMemo(() => {
+    const onlineIds = new Set(onlineUsers.map(u => u.id));
+    const knownUsers = new Map<string, string>(); // Id -> Username
+
+    messages.forEach(msg => {
+      // If we haven't seen this user ID yet, add them
+      if (!knownUsers.has(msg.userId)) {
+        knownUsers.set(msg.userId, msg.username);
+      }
+      // If we have seen them, but the message is newer/different username, update it (optional, but good for keeping names fresh)
+      // For V1, simple set is fine.
+    });
+
+    const offline: User[] = [];
+    knownUsers.forEach((name, id) => {
+      if (!onlineIds.has(id)) {
+        offline.push({ id, username: name });
+      }
+    });
+
+    return offline;
+  }, [messages, onlineUsers]);
+
 
   const handleLogin = (username: string) => {
     const newUser: User = { id: generateUUID(), username };
@@ -122,8 +146,8 @@ const App: React.FC = () => {
   };
 
   const scrollToMessage = (id: string) => {
-    // If search panel is open on mobile, maybe close it?
-    // setIsSearchOpen(false); 
+    // Close search panel when jumping
+    setIsSearchOpen(false);
     
     const element = document.getElementById(`msg-${id}`);
     if (element) {
@@ -132,8 +156,6 @@ const App: React.FC = () => {
       element.classList.add('bg-neon-purple/20', 'transition-colors', 'duration-1000');
       setTimeout(() => element.classList.remove('bg-neon-purple/20'), 1000);
     } else {
-      // If message is not loaded (virtualization) or too old, we might need to fetch it.
-      // But for V1 we have all messages.
       console.warn("Message element not found in DOM");
     }
   };
@@ -199,6 +221,15 @@ const App: React.FC = () => {
           >
             <Search size={20} />
           </button>
+          
+          {/* Mobile User List Toggle */}
+          <button 
+             onClick={() => setIsUserListOpen(!isUserListOpen)}
+             className={`lg:hidden p-2 rounded-full transition-all ${isUserListOpen ? 'bg-neon-purple/20 text-neon-purple' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
+          >
+             <Users size={20} />
+          </button>
+
           <div className="h-6 w-px bg-gray-300 dark:bg-gray-700"></div>
           <ThemeToggle />
         </div>
@@ -207,9 +238,21 @@ const App: React.FC = () => {
       {/* Main Layout */}
       <div className="flex-1 overflow-hidden relative flex">
         
-        {/* Sidebar (Desktop: Stats + Users) */}
-        <div className="hidden lg:flex w-64 bg-gray-50 dark:bg-[#0f1422] border-r border-gray-200 dark:border-gray-800 flex-col p-4 overflow-y-auto custom-scrollbar">
-           
+        {/* Sidebar (Responsive) */}
+        <div className={`
+            absolute lg:relative z-30 inset-y-0 left-0 w-64 
+            bg-gray-50 dark:bg-[#0f1422] border-r border-gray-200 dark:border-gray-800 
+            flex flex-col p-4 overflow-y-auto custom-scrollbar transform transition-transform duration-300
+            ${isUserListOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'}
+            shadow-2xl lg:shadow-none
+        `}>
+           {/* Close Button Mobile */}
+           <div className="lg:hidden flex justify-end mb-4">
+              <button onClick={() => setIsUserListOpen(false)} className="text-gray-500 hover:text-white">
+                <X size={20} />
+              </button>
+           </div>
+
            {/* Stats */}
            <div className="mb-6">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3">Stats</h2>
@@ -220,10 +263,10 @@ const App: React.FC = () => {
            </div>
            
            {/* Online Users */}
-           <div className="flex-1">
+           <div className="mb-6">
               <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
-                <span>Online Users</span>
-                <span className="bg-neon-cyan/10 text-neon-cyan px-1.5 rounded-full text-[10px]">{onlineUsers.length}</span>
+                <span className="text-green-500">Online</span>
+                <span className="bg-green-500/10 text-green-500 px-1.5 rounded-full text-[10px]">{onlineUsers.length}</span>
               </h2>
               <ul className="space-y-2">
                 {onlineUsers.map((u, idx) => (
@@ -238,7 +281,34 @@ const App: React.FC = () => {
                 )}
               </ul>
            </div>
+
+           {/* Offline Users */}
+           <div className="flex-1">
+              <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
+                <span className="text-gray-500">Offline</span>
+                <span className="bg-gray-800 text-gray-500 px-1.5 rounded-full text-[10px]">{offlineUsers.length}</span>
+              </h2>
+              <ul className="space-y-2 opacity-60">
+                {offlineUsers.map((u, idx) => (
+                  <li key={`off-${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-400">
+                    <div className="w-2 h-2 rounded-full bg-gray-600"></div>
+                    <span>{u.username}</span>
+                  </li>
+                ))}
+                {offlineUsers.length === 0 && (
+                  <li className="text-xs text-gray-600 italic">No offline history</li>
+                )}
+              </ul>
+           </div>
         </div>
+
+        {/* Overlay for Mobile Sidebar */}
+        {isUserListOpen && (
+          <div 
+            className="fixed inset-0 bg-black/50 z-20 lg:hidden"
+            onClick={() => setIsUserListOpen(false)}
+          />
+        )}
 
         {/* Message Feed Container */}
         <div className="flex-1 flex flex-col relative min-w-0">
