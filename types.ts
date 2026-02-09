@@ -1,4 +1,4 @@
-export type MessageType = 'text' | 'image' | 'video' | 'audio';
+export type MessageType = 'text' | 'image' | 'video' | 'audio' | 'file';
 
 export interface User {
   id: string;

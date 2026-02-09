@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, LinkPreview, User } from '../types';
-import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check } from 'lucide-react';
+import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check, FileText, Download } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface MessageBubbleProps {
@@ -413,6 +413,29 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
            <audio src={message.content} controls className="w-full h-10" />
          </div>
       );
+    }
+
+    if (message.type === 'file') {
+       return (
+         <a 
+           href={message.content} 
+           target="_blank" 
+           rel="noopener noreferrer" 
+           className="mt-1 flex items-center p-3 rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-black/30 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors group/file min-w-[200px]"
+           onClick={(e) => e.stopPropagation()}
+         >
+            <div className="p-2 rounded bg-neon-purple/20 text-neon-purple mr-3">
+               <FileText size={24} />
+            </div>
+            <div className="flex-1 min-w-0">
+               <div className="text-sm font-bold text-gray-800 dark:text-gray-200 truncate">{message.fileName || 'Unknown File'}</div>
+               <div className="text-[10px] text-gray-500 uppercase tracking-wide">Download File</div>
+            </div>
+            <div className="ml-2 text-gray-400 group-hover/file:text-neon-cyan transition-colors">
+               <Download size={20} />
+            </div>
+         </a>
+       );
     }
 
     return <RichTextRenderer 
