@@ -15,7 +15,7 @@ interface MessageBubbleProps {
 
 // --- Rich Text Parser Components ---
 
-const LinkPreviewCard: React.FC<{ url: string }> = ({ url }) => {
+const LinkPreviewCard: React.FC<{ url: string, onRemove?: () => void, canRemove?: boolean }> = ({ url, onRemove, canRemove }) => {
   const [data, setData] = useState<LinkPreview | null>(null);
   const [loading, setLoading] = useState(true);
 
@@ -34,24 +34,35 @@ const LinkPreviewCard: React.FC<{ url: string }> = ({ url }) => {
   if (!data || (!data.title && !data.image)) return null; 
 
   return (
-    <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-2 max-w-sm rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 hover:border-neon-cyan transition-colors">
-      {data.image && (
-        <div className="h-32 w-full overflow-hidden relative bg-black/50">
-           <img src={data.image} alt={data.title} className="w-full h-full object-cover" />
-           <div className="absolute bottom-1 right-1 bg-black/70 px-1 rounded text-[10px] text-white uppercase font-bold tracking-wider">
-             {data.siteName || new URL(url).hostname.replace('www.', '')}
-           </div>
+    <div className="relative group/preview">
+      <a href={url} target="_blank" rel="noopener noreferrer" className="block mt-2 max-w-sm rounded-lg overflow-hidden bg-gray-100 dark:bg-gray-900 border border-gray-300 dark:border-gray-700 hover:border-neon-cyan transition-colors">
+        {data.image && (
+          <div className="h-32 w-full overflow-hidden relative bg-black/50">
+            <img src={data.image} alt={data.title} className="w-full h-full object-cover" />
+            <div className="absolute bottom-1 right-1 bg-black/70 px-1 rounded text-[10px] text-white uppercase font-bold tracking-wider">
+              {data.siteName || new URL(url).hostname.replace('www.', '')}
+            </div>
+          </div>
+        )}
+        <div className="p-3">
+          {data.title && <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-tight">{data.title}</h4>}
+          {data.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{data.description}</p>}
         </div>
+      </a>
+      {canRemove && onRemove && (
+        <button 
+          onClick={(e) => { e.preventDefault(); e.stopPropagation(); onRemove(); }}
+          className="absolute -top-2 -right-2 bg-gray-800 text-gray-400 hover:text-red-500 rounded-full p-1 opacity-0 group-hover/preview:opacity-100 transition-opacity shadow-md border border-gray-600"
+          title="Remove Preview"
+        >
+          <X size={12} />
+        </button>
       )}
-      <div className="p-3">
-        {data.title && <h4 className="font-bold text-sm text-gray-900 dark:text-gray-100 line-clamp-2 leading-tight">{data.title}</h4>}
-        {data.description && <p className="text-xs text-gray-500 mt-1 line-clamp-2">{data.description}</p>}
-      </div>
-    </a>
+    </div>
   );
 };
 
-const FormatInline: React.FC<{ text: string }> = ({ text }) => {
+const FormatInline: React.FC<{ text: string, hiddenPreviews?: string[], onRemovePreview?: (url: string) => void, canRemovePreview?: boolean }> = ({ text, hiddenPreviews = [], onRemovePreview, canRemovePreview }) => {
   const codeParts = text.split(/(`[^`]+`)/g);
   
   return (
@@ -61,13 +72,36 @@ const FormatInline: React.FC<{ text: string }> = ({ text }) => {
           return <code key={i} className="bg-black/30 text-neon-pink px-1.5 py-0.5 rounded text-xs font-mono mx-0.5">{part.slice(1, -1)}</code>;
         }
 
-        const urlRegex = /(https?:\/\/[^\s]+)/g;
+        // Regex to capture <url> OR url
+        // Group 1: <url> (should hide preview)
+        // Group 2: url (should show preview)
+        const urlRegex = /(<https?:\/\/[^\s>]+>)|(https?:\/\/[^\s]+)/g;
         const urlParts = part.split(urlRegex);
 
         return (
           <span key={i}>
             {urlParts.map((subPart, j) => {
-              if (subPart.match(urlRegex)) {
+              if (!subPart) return null; // Split might return undefineds due to capture groups
+
+              if (subPart.startsWith('<') && subPart.endsWith('>') && subPart.match(/<https?:\/\//)) {
+                // Manually hidden via angle brackets
+                const cleanUrl = subPart.slice(1, -1);
+                return (
+                  <a 
+                    key={j}
+                    href={cleanUrl} 
+                    target="_blank" 
+                    rel="noopener noreferrer" 
+                    className="text-neon-cyan underline hover:text-white break-all inline-flex items-center"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {cleanUrl} <ExternalLink size={10} className="ml-1 inline" />
+                  </a>
+                );
+              }
+
+              if (subPart.match(/^https?:\/\//)) {
+                const isHidden = hiddenPreviews.includes(subPart);
                 return (
                   <span key={j}>
                     <a 
@@ -79,8 +113,14 @@ const FormatInline: React.FC<{ text: string }> = ({ text }) => {
                     >
                       {subPart} <ExternalLink size={10} className="ml-1 inline" />
                     </a>
-                    {/* Render Preview Card */}
-                    <LinkPreviewCard url={subPart} />
+                    {/* Render Preview Card if not hidden */}
+                    {!isHidden && (
+                      <LinkPreviewCard 
+                        url={subPart} 
+                        canRemove={canRemovePreview} 
+                        onRemove={() => onRemovePreview && onRemovePreview(subPart)} 
+                      />
+                    )}
                   </span>
                 );
               }
@@ -114,7 +154,7 @@ const FormatInline: React.FC<{ text: string }> = ({ text }) => {
   );
 };
 
-const RichTextRenderer: React.FC<{ content: string }> = ({ content }) => {
+const RichTextRenderer: React.FC<{ content: string, message: Message, onRemovePreview?: (url: string) => void, canEdit?: boolean }> = ({ content, message, onRemovePreview, canEdit }) => {
   const codeBlocks = content.split(/(```[\s\S]*?```)/g);
 
   return (
@@ -144,13 +184,18 @@ const RichTextRenderer: React.FC<{ content: string }> = ({ content }) => {
               if (line.startsWith('> ')) {
                 return (
                   <div key={j} className="border-l-4 border-neon-pink/50 pl-3 py-1 my-1 bg-neon-pink/5 text-gray-400 italic">
-                    <FormatInline text={line.slice(2)} />
+                    <FormatInline text={line.slice(2)} hiddenPreviews={message.hiddenPreviews} />
                   </div>
                 );
               }
               return (
                  <div key={j} className={wrapperClass}>
-                    <FormatInline text={line} />
+                    <FormatInline 
+                      text={line} 
+                      hiddenPreviews={message.hiddenPreviews}
+                      onRemovePreview={onRemovePreview}
+                      canRemovePreview={canEdit}
+                    />
                  </div>
               );
             })}
@@ -240,6 +285,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (!currentUser) return;
     chatService.toggleReaction(message.id, emoji, currentUser.id);
   };
+  
+  const handleRemovePreview = (url: string) => {
+    chatService.removePreview(message, url);
+  };
 
   const isMentioned = currentUser && !isOwnMessage && message.content.includes(`@${currentUser.username}`);
 
@@ -272,7 +321,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       );
     }
 
-    return <RichTextRenderer content={message.content} />;
+    return <RichTextRenderer 
+             content={message.content} 
+             message={message} 
+             onRemovePreview={handleRemovePreview}
+             canEdit={isOwnMessage}
+           />;
   };
 
   return (
@@ -311,7 +365,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             ? 'bg-neon-cyan/10 border border-neon-cyan/30 text-gray-900 dark:text-gray-100 rounded-tr-sm' 
             : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 rounded-tl-sm'
           }
-          ${isMentioned ? 'bg-yellow-500/10 border-l-4 border-l-yellow-500' : ''}
+          ${isMentioned ? 'bg-yellow-500/20 dark:bg-yellow-500/10 border-2 border-yellow-500 shadow-[0_0_10px_rgba(234,179,8,0.3)]' : ''}
           ${isHovered ? 'shadow-lg' : ''}
         `}>
           {isEditing ? (

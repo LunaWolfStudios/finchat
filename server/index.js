@@ -40,7 +40,7 @@ app.use(express.json());
 // Serve uploaded media files statically
 app.use('/uploads', express.static(MEDIA_DIR));
 
-// Configure Multer for disk storage
+// Configure Multer for disk storage with 100MB limit
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
     cb(null, MEDIA_DIR);
@@ -51,7 +51,10 @@ const storage = multer.diskStorage({
     cb(null, uniqueSuffix + ext);
   }
 });
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 100 * 1024 * 1024 } // 100MB
+});
 
 // --- DATA ACCESS HELPERS (Synchronous to prevent race conditions) ---
 
@@ -113,16 +116,16 @@ app.get('/preview', async (req, res) => {
     const response = await fetch(targetUrl, {
       headers: {
         'User-Agent': 'Mozilla/5.0 (compatible; Discordbot/2.0; +https://discordapp.com)'
-      }
+      },
+      signal: AbortSignal.timeout(5000) // 5s timeout
     });
     
-    if (!response.ok) throw new Error('Failed to fetch');
+    if (!response.ok) throw new Error(`Failed to fetch: ${response.status}`);
     const html = await response.text();
 
     // Robust Regex Parsing for OG and Twitter Tags
     const getMetaContent = (prop) => {
       // Matches <meta property="og:title" content="..."> OR <meta name="twitter:title" content="...">
-      // Also handles inconsistent quoting and spacing
       const regex = new RegExp(`<meta\\s+(?:property|name)=["'](?:og:|twitter:)?${prop}["']\\s+content=["'](.*?)["']`, 'i');
       const match = html.match(regex);
       return match ? match[1] : null;
@@ -136,8 +139,8 @@ app.get('/preview', async (req, res) => {
 
     res.json({ url: targetUrl, title, description, image, siteName });
   } catch (e) {
-    console.error("Preview fetch error:", e);
-    // Return empty success so UI just handles it as no-preview rather than crashing
+    console.error("Preview fetch error for", targetUrl, e.message);
+    // Return success with empty data to prevent client errors, just shows no preview
     res.json({ url: targetUrl });
   }
 });
@@ -193,7 +196,13 @@ wss.on('connection', (ws) => {
         if (index !== -1) {
           // Preserve reactions if any, as payload might not have them if edited from client state loosely
           const oldMsg = currentMessages[index];
-          currentMessages[index] = { ...oldMsg, ...payload, reactions: oldMsg.reactions };
+          // Merge old message with new payload (content, edited, hiddenPreviews)
+          // Ensure reactions are preserved
+          currentMessages[index] = { 
+            ...oldMsg, 
+            ...payload, 
+            reactions: oldMsg.reactions 
+          };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
         }
@@ -237,6 +246,7 @@ wss.on('connection', (ws) => {
         // New Message (Standard)
         if (!message.timestamp) message.timestamp = new Date().toISOString();
         if (!message.reactions) message.reactions = {};
+        if (!message.hiddenPreviews) message.hiddenPreviews = [];
         
         currentMessages.push(message);
         saveAllMessages(currentMessages);

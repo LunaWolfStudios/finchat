@@ -151,7 +151,7 @@ class ChatService {
     return data.url;
   }
 
-  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted' | 'reactions'> & { file?: File }): Promise<void> {
+  async saveMessage(message: Omit<Message, 'id' | 'timestamp' | 'edited' | 'deleted' | 'reactions' | 'hiddenPreviews'> & { file?: File }): Promise<void> {
     let content = message.content;
 
     // Handle File Upload if present
@@ -175,7 +175,8 @@ class ChatService {
       replyTo: message.replyTo,
       edited: false,
       deleted: false,
-      reactions: {}
+      reactions: {},
+      hiddenPreviews: []
     };
 
     this.sendToSocket(newMessage);
@@ -184,6 +185,19 @@ class ChatService {
   editMessage(originalMessage: Message, newContent: string) {
     const updatedMessage = { ...originalMessage, content: newContent, edited: true };
     this.sendToSocket({ action: 'EDIT', payload: updatedMessage });
+  }
+
+  removePreview(originalMessage: Message, urlToRemove: string) {
+    const currentHidden = originalMessage.hiddenPreviews || [];
+    if (!currentHidden.includes(urlToRemove)) {
+      const updatedMessage = { 
+        ...originalMessage, 
+        hiddenPreviews: [...currentHidden, urlToRemove]
+      };
+      // We send 'EDIT' action to propagate the change. 
+      // Server merges payload, so this updates the hiddenPreviews field.
+      this.sendToSocket({ action: 'EDIT', payload: updatedMessage });
+    }
   }
 
   deleteMessage(originalMessage: Message) {

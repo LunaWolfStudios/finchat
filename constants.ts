@@ -8,7 +8,7 @@ export const STORAGE_KEY_THEME = 'finchat_theme';
 export const STORAGE_KEY_ARCHIVE = 'finchat_archive';
 
 // Mock constraints
-export const MAX_FILE_SIZE_BYTES = 5 * 1024 * 1024; // 5MB limit for localstorage demo
+export const MAX_FILE_SIZE_BYTES = 100 * 1024 * 1024; // 100MB limit
 export const ARCHIVE_AGE_DAYS = 180;
 
 export const THEMES = {

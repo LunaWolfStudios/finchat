@@ -7,10 +7,10 @@ interface ChatInputProps {
   onSendMessage: (content: string, type: MessageType, file?: File) => void;
   replyTo: Message | null;
   onCancelReply: () => void;
-  onlineUsers?: User[];
+  allUsers: User[]; // Changed from onlineUsers
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, onlineUsers = [] }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, allUsers = [] }) => {
   const [text, setText] = useState('');
   const [preview, setPreview] = useState<string | null>(null);
   const [fileType, setFileType] = useState<MessageType>('text');
@@ -106,7 +106,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
   };
 
   const filteredUsers = mentionQuery !== null 
-    ? onlineUsers.filter(u => u.username.toLowerCase().startsWith(mentionQuery.toLowerCase()))
+    ? allUsers.filter(u => u.username.toLowerCase().startsWith(mentionQuery.toLowerCase()))
     : [];
 
   return (
@@ -115,13 +115,13 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
       {/* Mention Popup */}
       {mentionQuery !== null && filteredUsers.length > 0 && (
         <div className="absolute bottom-full mb-2 left-4 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-xl overflow-hidden min-w-[150px] max-h-48 overflow-y-auto">
-          {filteredUsers.map(u => (
+          {filteredUsers.map((u, idx) => (
             <button
-              key={u.id}
+              key={`${u.id}-${idx}`}
               onClick={() => insertMention(u.username)}
               className="w-full text-left px-3 py-2 text-sm hover:bg-neon-cyan/10 hover:text-neon-cyan flex items-center space-x-2 text-gray-700 dark:text-gray-300 transition-colors"
             >
-              <div className="w-2 h-2 rounded-full bg-green-500"></div>
+              <div className="w-2 h-2 rounded-full bg-gray-500"></div>
               <span>{u.username}</span>
             </button>
           ))}

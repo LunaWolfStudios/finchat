@@ -86,8 +86,14 @@ const App: React.FC = () => {
     // 2. Load Initial History (200 latest)
     const fetchHistory = async () => {
       setIsLoadingHistory(true);
-      const history = await chatService.getMessages(200);
+      const limit = 200;
+      const history = await chatService.getMessages(limit);
       setMessages(history);
+      
+      if (history.length < limit) {
+        setHasMoreHistory(false);
+      }
+
       setIsLoadingHistory(false);
       initialLoadDone.current = true;
       
@@ -155,11 +161,15 @@ const App: React.FC = () => {
     
     setIsLoadingHistory(true);
     const oldestTimestamp = messages[0].timestamp;
+    const limit = 200;
     
-    const olderMessages = await chatService.getMessages(200, oldestTimestamp);
+    const olderMessages = await chatService.getMessages(limit, oldestTimestamp);
     
     if (olderMessages.length > 0) {
       setMessages(prev => [...olderMessages, ...prev]);
+      if (olderMessages.length < limit) {
+        setHasMoreHistory(false);
+      }
     } else {
       setHasMoreHistory(false);
     }
@@ -187,6 +197,10 @@ const App: React.FC = () => {
     return offline;
   }, [messages, onlineUsers]);
 
+  // Combined User List for Mentions
+  const allKnownUsers = useMemo(() => {
+    return [...onlineUsers, ...offlineUsers];
+  }, [onlineUsers, offlineUsers]);
 
   const handleLogin = (username: string) => {
     const newUser: User = { id: generateUUID(), username };
@@ -194,6 +208,12 @@ const App: React.FC = () => {
     setUser(newUser);
     if (connectionStatus === 'connected') {
       chatService.sendJoin(newUser);
+    }
+    // Request permission on first login
+    if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
+      Notification.requestPermission().then(perm => {
+        setNotificationsEnabled(perm === 'granted');
+      });
     }
   };
 
@@ -448,7 +468,7 @@ const App: React.FC = () => {
               onSendMessage={handleSendMessage}
               replyTo={replyTo}
               onCancelReply={() => setReplyTo(null)}
-              onlineUsers={onlineUsers}
+              allUsers={allKnownUsers}
             />
           </div>
         </div>

@@ -18,6 +18,7 @@ export interface Message {
   edited: boolean;
   deleted: boolean;
   reactions?: { [emoji: string]: string[] }; // Emoji char -> Array of User IDs
+  hiddenPreviews?: string[]; // List of URLs whose previews should be hidden
 }
 
 export interface SearchFilters {

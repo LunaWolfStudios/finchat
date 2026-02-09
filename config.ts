@@ -13,6 +13,6 @@ export const CONFIG = {
   WS_URL: `ws://${HOST}:${API_PORT}`,
   
   // Constraints
-  MAX_FILE_SIZE_BYTES: 50 * 1024 * 1024, // 50MB
+  MAX_FILE_SIZE_BYTES: 100 * 1024 * 1024, // 100MB
   RECONNECT_INTERVAL_MS: 3000,
 };
