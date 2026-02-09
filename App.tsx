@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { Message, User, SearchFilters, MessageType } from './types';
-import { chatService } from './services/chatService';
+import { chatService, generateUUID } from './services/chatService';
 import { STORAGE_KEY_USER, APP_NAME } from './constants';
 import { MessageBubble } from './components/MessageBubble';
 import { ChatInput } from './components/ChatInput';
@@ -82,7 +82,7 @@ const App: React.FC = () => {
   }, [messages.length, searchFilters]);
 
   const handleLogin = (username: string) => {
-    const newUser: User = { id: crypto.randomUUID(), username };
+    const newUser: User = { id: generateUUID(), username };
     localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
     setUser(newUser);
   };
