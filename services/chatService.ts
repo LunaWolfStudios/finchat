@@ -12,6 +12,10 @@ export const generateUUID = () => {
   });
 };
 
+const isMobileDevice = () => {
+  return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent);
+};
+
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
 class ChatService {
@@ -124,9 +128,6 @@ class ChatService {
        const params = new URLSearchParams();
        if (filters.query) params.append('q', filters.query);
        if (filters.channelId) params.append('channelId', filters.channelId);
-       // Note: complex filters like author/date handled in server or client-side post-processing
-       // For V1, we rely on backend text search + client filtering for other fields if needed, 
-       // but strictly backend 'q' search is most efficient.
        
        const res = await fetch(`${CONFIG.API_URL}/messages?${params.toString()}&limit=100`);
        if (!res.ok) throw new Error('Search failed');
@@ -201,13 +202,13 @@ class ChatService {
   }
 
   sendJoin(user: User) {
-    this.currentUser = user;
-    this.sendToSocket({ action: 'JOIN', payload: user });
+    this.currentUser = { ...user, isMobile: isMobileDevice() };
+    this.sendToSocket({ action: 'JOIN', payload: this.currentUser });
   }
 
   updateUser(user: User) {
-    this.currentUser = user;
-    this.sendToSocket({ action: 'UPDATE_USER', payload: user });
+    this.currentUser = { ...user, isMobile: isMobileDevice() };
+    this.sendToSocket({ action: 'UPDATE_USER', payload: this.currentUser });
   }
 
   toggleReaction(messageId: string, emoji: string, userId: string) {

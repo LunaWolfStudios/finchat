@@ -8,7 +8,7 @@ import { ThemeToggle } from './components/ThemeToggle';
 import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
 import { PinnedPanel } from './components/PinnedPanel';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight } from 'lucide-react';
+import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight, Smartphone } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -21,7 +21,7 @@ const App: React.FC = () => {
   const [newChannelName, setNewChannelName] = useState('');
 
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
-  const [knownUsers, setKnownUsers] = useState<Map<string, string>>(new Map()); // id -> username
+  const [knownUsers, setKnownUsers] = useState<Map<string, User>>(new Map()); // id -> User Object
   
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const [isPinnedOpen, setIsPinnedOpen] = useState(false);
@@ -30,6 +30,11 @@ const App: React.FC = () => {
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
   
+  // Pin Notification State
+  const [lastViewedPinTime, setLastViewedPinTime] = useState<string>(
+    localStorage.getItem('finchat_last_pin_view') || new Date(0).toISOString()
+  );
+
   // Username Edit State
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
@@ -169,18 +174,19 @@ const App: React.FC = () => {
          const next = new Map(prev);
          let changed = false;
          
+         // Add from messages (might miss mobile info if not in message, but generic info persists)
          messages.forEach(m => {
              if (!next.has(m.userId)) {
-                 next.set(m.userId, m.username);
+                 next.set(m.userId, { id: m.userId, username: m.username });
                  changed = true;
              }
          });
          
+         // Add from online users (Contains mobile info)
          onlineUsers.forEach(u => {
-             if (!next.has(u.id)) {
-                 next.set(u.id, u.username);
-                 changed = true;
-             }
+             // Always update online users to capture latest mobile state
+             next.set(u.id, u);
+             changed = true;
          });
          
          return changed ? next : prev;
@@ -232,9 +238,9 @@ const App: React.FC = () => {
   const offlineUsers = useMemo(() => {
     const onlineIds = new Set(onlineUsers.map(u => u.id));
     const offline: User[] = [];
-    knownUsers.forEach((username, id) => {
+    knownUsers.forEach((u, id) => {
         if (!onlineIds.has(id)) {
-            offline.push({ id, username });
+            offline.push(u);
         }
     });
     return offline;
@@ -244,9 +250,22 @@ const App: React.FC = () => {
     return [...onlineUsers, ...offlineUsers];
   }, [onlineUsers, offlineUsers]);
 
-  const pinnedCount = useMemo(() => {
-      return messages.filter(m => m.pinned && !m.deleted).length;
-  }, [messages]);
+  // Calculate NEW pins for notification
+  const newPinsCount = useMemo(() => {
+      return messages.filter(m => m.pinned && !m.deleted && m.pinnedAt && m.pinnedAt > lastViewedPinTime).length;
+  }, [messages, lastViewedPinTime]);
+
+  // Handle Opening Pin Panel
+  const handleTogglePinPanel = () => {
+      if (!isPinnedOpen) {
+          // Opening: Mark all as seen
+          const now = new Date().toISOString();
+          setLastViewedPinTime(now);
+          localStorage.setItem('finchat_last_pin_view', now);
+          setIsSearchOpen(false);
+      }
+      setIsPinnedOpen(!isPinnedOpen);
+  };
 
   const getReplySnippet = useCallback((id: string) => {
     const msg = messages.find(m => m.id === id);
@@ -399,14 +418,14 @@ const App: React.FC = () => {
           </button>
           
           <button 
-            onClick={() => { setIsPinnedOpen(!isPinnedOpen); setIsSearchOpen(false); }}
+            onClick={handleTogglePinPanel}
             className={`p-2 rounded-full transition-all relative ${isPinnedOpen ? 'bg-yellow-500/20 text-yellow-500' : 'hover:bg-gray-100 dark:hover:bg-gray-800 text-gray-500'}`}
             title="Pinned Messages"
           >
             <Pin size={20} className={isPinnedOpen ? "fill-current" : ""} />
-            {pinnedCount > 0 && (
+            {newPinsCount > 0 && (
                 <span className="absolute top-0 right-0 w-4 h-4 bg-red-500 text-white text-[9px] flex items-center justify-center rounded-full font-bold shadow-sm">
-                    {pinnedCount > 9 ? '9+' : pinnedCount}
+                    {newPinsCount > 9 ? '9+' : newPinsCount}
                 </span>
             )}
           </button>
@@ -504,7 +523,11 @@ const App: React.FC = () => {
                   <ul className="space-y-2">
                     {onlineUsers.map((u, idx) => (
                       <li key={`${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
-                        <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
+                        {u.isMobile ? (
+                            <Smartphone size={14} className="text-green-500 drop-shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
+                        ) : (
+                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
+                        )}
                         <span className={u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}>{u.username}</span>
                         {u.id === user.id && <span className="text-[10px] text-gray-400">(You)</span>}
                       </li>

@@ -4,6 +4,7 @@ export interface User {
   id: string;
   username: string;
   color?: string;
+  isMobile?: boolean; // New property
 }
 
 export interface Channel {
@@ -15,7 +16,7 @@ export interface Channel {
 
 export interface Message {
   id: string;
-  channelId: string; // New property
+  channelId: string;
   userId: string;
   username: string;
   timestamp: string; // ISO8601
@@ -26,6 +27,7 @@ export interface Message {
   edited: boolean;
   deleted: boolean;
   pinned?: boolean; 
+  pinnedAt?: string; // New property: Timestamp when the message was pinned
   reactions?: { [emoji: string]: string[] }; // Emoji char -> Array of User IDs
   hiddenPreviews?: string[]; // List of URLs whose previews should be hidden
 }

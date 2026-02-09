@@ -162,9 +162,6 @@ app.get('/messages', (req, res) => {
   }
 
   // 4. Sort & Limit
-  // If searching, we might want newest matches. If paging, standard logic applies.
-  // Messages are stored chronologically (append-only), so slice from end is correct for recent.
-  
   const slice = allMessages.slice(-limit);
   
   res.json(slice);
@@ -250,7 +247,8 @@ wss.on('connection', (ws) => {
             ...payload, 
             reactions: oldMsg.reactions,
             pinned: oldMsg.pinned,
-            channelId: oldMsg.channelId || 'general' // Preserve channel
+            pinnedAt: oldMsg.pinnedAt, // Preserve pinned timestamp
+            channelId: oldMsg.channelId || 'general'
           };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -265,7 +263,8 @@ wss.on('connection', (ws) => {
             deleted: true, 
             content: 'Message deleted', 
             type: 'text',
-            pinned: false
+            pinned: false,
+            pinnedAt: undefined // Remove pin timestamp
           };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -275,7 +274,17 @@ wss.on('connection', (ws) => {
         const { messageId } = message.payload;
         const index = currentMessages.findIndex(m => m.id === messageId);
         if (index !== -1) {
-          currentMessages[index].pinned = !currentMessages[index].pinned;
+          const newPinnedState = !currentMessages[index].pinned;
+          currentMessages[index].pinned = newPinnedState;
+          
+          if (newPinnedState) {
+            // Add Timestamp if pinning
+            currentMessages[index].pinnedAt = new Date().toISOString();
+          } else {
+            // Remove Timestamp if unpinning
+            delete currentMessages[index].pinnedAt;
+          }
+
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
         }
