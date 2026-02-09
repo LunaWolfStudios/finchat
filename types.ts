@@ -23,7 +23,7 @@ export interface SearchFilters {
   query: string;
   username?: string;
   date?: string;
-  type?: MessageType;
+  type?: MessageType | 'link';
 }
 
 export interface ArchiveStats {

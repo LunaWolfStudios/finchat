@@ -93,8 +93,27 @@ app.post('/upload', upload.single('file'), (req, res) => {
 const server = http.createServer(app);
 const wss = new WebSocketServer({ server });
 
+// Map to track connected users: WebSocket -> User Object
+const clients = new Map();
+
+const broadcastUserList = () => {
+  const users = Array.from(clients.values()).filter(u => u !== null);
+  // Deduplicate by ID to show unique users (in case of multiple tabs)
+  const uniqueUsersMap = new Map();
+  users.forEach(u => uniqueUsersMap.set(u.id, u));
+  const uniqueUsers = Array.from(uniqueUsersMap.values());
+
+  const msg = JSON.stringify({ type: 'USER_LIST', payload: uniqueUsers });
+  wss.clients.forEach((client) => {
+    if (client.readyState === 1) { // WebSocket.OPEN
+      client.send(msg);
+    }
+  });
+};
+
 wss.on('connection', (ws) => {
   console.log('Client connected');
+  clients.set(ws, null); // Initialize as unknown
 
   ws.on('message', (messageStr) => {
     try {
@@ -102,6 +121,20 @@ wss.on('connection', (ws) => {
       let broadcastMsg = null;
       
       const currentMessages = getMessages();
+
+      if (message.action === 'JOIN') {
+        clients.set(ws, message.payload);
+        broadcastUserList();
+        return; // Don't broadcast JOIN as a chat message
+      }
+
+      if (message.action === 'UPDATE_USER') {
+        clients.set(ws, message.payload);
+        broadcastUserList();
+        // Optionally update historical messages for this user? 
+        // For V1, we keep history as is (immutable identity snapshot)
+        return;
+      }
 
       if (message.action === 'EDIT') {
         const payload = message.payload;
@@ -123,7 +156,6 @@ wss.on('connection', (ws) => {
       } 
       else {
         // New Message (Standard)
-        // Ensure server-side timestamp for consistency
         if (!message.timestamp) message.timestamp = new Date().toISOString();
         
         currentMessages.push(message);
@@ -131,11 +163,11 @@ wss.on('connection', (ws) => {
         broadcastMsg = { type: 'NEW_MESSAGE', payload: message };
       }
 
-      // Broadcast to ALL connected clients (including sender to confirm sync)
+      // Broadcast to ALL connected clients
       if (broadcastMsg) {
         const msgStr = JSON.stringify(broadcastMsg);
         wss.clients.forEach((client) => {
-          if (client.readyState === WebSocket.OPEN) {
+          if (client.readyState === 1) {
             client.send(msgStr);
           }
         });
@@ -148,6 +180,8 @@ wss.on('connection', (ws) => {
 
   ws.on('close', () => {
     console.log('Client disconnected');
+    clients.delete(ws);
+    broadcastUserList();
   });
 });
 

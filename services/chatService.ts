@@ -21,9 +21,11 @@ class ChatService {
   private messageCallback: ((msg: Message) => void) | null = null;
   private updateCallback: ((msg: Message) => void) | null = null;
   private statusCallback: ((status: ConnectionStatus) => void) | null = null;
+  private userListCallback: ((users: User[]) => void) | null = null;
   
   // Track state internally so late subscribers get the current status immediately
   private connectionState: ConnectionStatus = 'disconnected'; 
+  private currentUser: User | null = null;
 
   constructor() {
     this.connect();
@@ -37,6 +39,10 @@ class ChatService {
     this.socket.onopen = () => {
       console.log('Connected to FinChat Server');
       this.updateState('connected');
+      // Re-send join if we reconnect and have a user
+      if (this.currentUser) {
+        this.sendJoin(this.currentUser);
+      }
     };
 
     this.socket.onmessage = (event) => {
@@ -46,6 +52,8 @@ class ChatService {
           this.messageCallback(data.payload);
         } else if (data.type === 'UPDATE_MESSAGE' && this.updateCallback) {
           this.updateCallback(data.payload);
+        } else if (data.type === 'USER_LIST' && this.userListCallback) {
+          this.userListCallback(data.payload);
         }
       } catch (e) {
         console.error("Failed to parse WS message", e);
@@ -78,14 +86,15 @@ class ChatService {
   subscribe(
     onNewMessage: (msg: Message) => void, 
     onStatusChange?: (status: ConnectionStatus) => void,
-    onMessageUpdate?: (msg: Message) => void
+    onMessageUpdate?: (msg: Message) => void,
+    onUserListUpdate?: (users: User[]) => void
   ) {
     this.messageCallback = onNewMessage;
     this.statusCallback = onStatusChange || null;
     this.updateCallback = onMessageUpdate || null;
+    this.userListCallback = onUserListUpdate || null;
     
     // IMPORTANT: Immediately notify the new subscriber of the CURRENT state.
-    // This fixes the race condition where the socket connects before the UI mounts.
     if (onStatusChange) {
       onStatusChange(this.connectionState);
     }
@@ -95,6 +104,7 @@ class ChatService {
       this.messageCallback = null;
       this.statusCallback = null;
       this.updateCallback = null;
+      this.userListCallback = null;
     };
   }
 
@@ -167,6 +177,16 @@ class ChatService {
         type: 'text' as const 
     };
     this.sendToSocket({ action: 'DELETE', payload: updatedMessage });
+  }
+
+  sendJoin(user: User) {
+    this.currentUser = user;
+    this.sendToSocket({ action: 'JOIN', payload: user });
+  }
+
+  updateUser(user: User) {
+    this.currentUser = user;
+    this.sendToSocket({ action: 'UPDATE_USER', payload: user });
   }
 
   private sendToSocket(data: any) {
