@@ -232,9 +232,7 @@ const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () 
   }, []);
 
   const handleSelect = (emoji: string) => {
-    const newRecents = [emoji, ...recents.filter(e => e !== emoji)].slice(0, 8);
-    localStorage.setItem('finchat_recent_emojis', JSON.stringify(newRecents));
-    setRecents(newRecents);
+    // onSelect handles the storage update via handleEmojiSelect in parent
     onSelect(emoji);
     onClose();
   };
@@ -311,6 +309,18 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     if (!currentUser) return;
     chatService.toggleReaction(message.id, emoji, currentUser.id);
     setShowMobileOptions(false);
+  };
+
+  const handleEmojiSelect = (emoji: string) => {
+    const stored = localStorage.getItem('finchat_recent_emojis');
+    const current = stored ? JSON.parse(stored) : [];
+    const newRecents = [emoji, ...current.filter((e: string) => e !== emoji)].slice(0, 8);
+    localStorage.setItem('finchat_recent_emojis', JSON.stringify(newRecents));
+    
+    // Update local state immediately so UI reflects it
+    setRecentEmojis(newRecents.slice(0, 3));
+    
+    handleReaction(emoji);
   };
   
   const handleRemovePreview = (url: string) => {
@@ -501,7 +511,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {recentEmojis.map(emoji => (
                     <button 
                       key={emoji}
-                      onClick={() => handleReaction(emoji)}
+                      onClick={() => handleEmojiSelect(emoji)}
                       className="p-1 hover:bg-white/10 rounded text-base transition-colors min-w-[24px] flex items-center justify-center"
                       title={emoji}
                     >
@@ -516,7 +526,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       <Smile size={16} />
                     </button>
                     {showReactionPicker && (
-                      <ReactionPicker onSelect={handleReaction} onClose={() => setShowReactionPicker(false)} />
+                      <ReactionPicker onSelect={handleEmojiSelect} onClose={() => setShowReactionPicker(false)} />
                     )}
                   </div>
                   <button 
@@ -567,7 +577,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                       text-xs px-1.5 py-0.5 rounded-full border flex items-center gap-1 transition-colors
                       ${currentUser && userIds.includes(currentUser.id) 
                         ? 'bg-neon-cyan/20 border-neon-cyan text-neon-cyan' 
-                        : 'bg-gray-800 border-gray-700 text-gray-400 hover:border-gray-500'
+                        : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 hover:border-gray-400 dark:hover:border-gray-500'
                       }
                     `}
                   >
@@ -589,9 +599,9 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
            <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => setShowMobileOptions(false)}></div>
            
            {/* Modal Content */}
-           <div className="relative bg-gray-900 border border-gray-700 rounded-xl w-full max-w-xs p-4 shadow-2xl animate-slide-up overflow-hidden">
+           <div className="relative bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-700 rounded-xl w-full max-w-xs p-4 shadow-2xl animate-slide-up overflow-hidden">
               <div className="flex justify-between items-center mb-4">
-                 <h3 className="text-neon-cyan font-bold text-sm uppercase tracking-wide">Message Options</h3>
+                 <h3 className="text-neon-purple dark:text-neon-cyan font-bold text-sm uppercase tracking-wide">Message Options</h3>
                  <button onClick={() => setShowMobileOptions(false)} className="text-gray-400"><X size={18}/></button>
               </div>
 
@@ -603,8 +613,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                         {recentEmojis.map(emoji => (
                              <button 
                                 key={`rec-${emoji}`} 
-                                onClick={() => handleReaction(emoji)}
-                                className="text-xl p-2 bg-gray-800/80 border border-gray-700 rounded hover:bg-gray-700"
+                                onClick={() => handleEmojiSelect(emoji)}
+                                className="text-xl p-2 bg-gray-100 dark:bg-gray-800/80 border border-gray-200 dark:border-gray-700 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
                               >
                                 {emoji}
                               </button>
@@ -619,8 +629,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                  {DEFAULT_EMOJIS.slice(0, 12).map(emoji => (
                     <button 
                       key={emoji} 
-                      onClick={() => handleReaction(emoji)}
-                      className="text-xl p-2 bg-gray-800 rounded hover:bg-gray-700"
+                      onClick={() => handleEmojiSelect(emoji)}
+                      className="text-xl p-2 bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200 dark:hover:bg-gray-700"
                     >
                       {emoji}
                     </button>
@@ -631,14 +641,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
               <div className="flex flex-col space-y-2">
                  <button 
                     onClick={() => { onReply(message); setShowMobileOptions(false); }}
-                    className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                    className="flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
                  >
                     <Reply size={18} className="mr-3 text-neon-cyan"/> Reply
                  </button>
                  
                  <button 
                     onClick={handleCopy}
-                    className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                    className="flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
                  >
                     {isCopied ? <Check size={18} className="mr-3 text-green-500"/> : <Copy size={18} className="mr-3 text-green-400"/>} 
                     {isCopied ? "Copied!" : "Copy Text"}
@@ -647,7 +657,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                  {isOwnMessage && message.type === 'text' && (
                    <button 
                       onClick={() => { setIsEditing(true); setShowMobileOptions(false); }}
-                      className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                      className="flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
                    >
                       <Edit2 size={18} className="mr-3 text-neon-purple"/> Edit
                    </button>
@@ -656,7 +666,7 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                  {isOwnMessage && (
                    <button 
                       onClick={() => { onDelete(message.id); setShowMobileOptions(false); }}
-                      className="flex items-center p-3 bg-gray-800 rounded-lg text-white hover:bg-gray-700"
+                      className="flex items-center p-3 bg-gray-100 dark:bg-gray-800 rounded-lg text-gray-900 dark:text-white hover:bg-gray-200 dark:hover:bg-gray-700"
                    >
                       <Trash2 size={18} className="mr-3 text-neon-pink"/> Delete
                    </button>
