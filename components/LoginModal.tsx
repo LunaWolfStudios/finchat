@@ -1,9 +1,8 @@
 import React, { useState } from 'react';
 import { Button } from './Button';
-import { generateUUID } from '../services/chatService';
 
 interface LoginModalProps {
-  onLogin: (username: string, userId?: string) => void;
+  onLogin: (input: string, isRecovery: boolean) => void;
 }
 
 export const LoginModal: React.FC<LoginModalProps> = ({ onLogin }) => {
@@ -13,15 +12,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLogin }) => {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (inputValue.trim().length > 1) {
-      if (isIdMode) {
-        // In a real app, we'd fetch the user profile here.
-        // For V1, we trust the ID and ask for a name update later if needed, 
-        // or just use a default name if it's a raw ID login without local storage history.
-        // We'll pass the ID up.
-        onLogin('User', inputValue.trim());
-      } else {
-        onLogin(inputValue.trim(), generateUUID());
-      }
+        onLogin(inputValue.trim(), isIdMode);
     }
   };
 

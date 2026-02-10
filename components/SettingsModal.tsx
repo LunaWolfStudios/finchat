@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Upload, User as UserIcon, Check, Copy, Eye, EyeOff, Fish } from 'lucide-react';
+import { X, Upload, User as UserIcon, Check, Copy, Eye, EyeOff, Fish, LogOut } from 'lucide-react';
 import { User } from '../types';
 import { Button } from './Button';
 import { chatService } from '../services/chatService';
@@ -8,9 +8,10 @@ interface SettingsModalProps {
   user: User;
   onClose: () => void;
   onUpdateUser: (updatedUser: User) => void;
+  onLogout: () => void;
 }
 
-export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUser }) => {
+export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUser, onLogout }) => {
   const [username, setUsername] = useState(user.username);
   const [statusMessage, setStatusMessage] = useState(user.statusMessage || '');
   const [avatar, setAvatar] = useState(user.avatar || '');
@@ -43,7 +44,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
     onUpdateUser({ 
         ...user, 
         username: username.trim(), 
-        avatar: imgError ? undefined : avatar, // If error, clear avatar? or keep it but it won't show
+        avatar: imgError ? undefined : avatar, 
         statusMessage: statusMessage.trim()
     });
     onClose();
@@ -79,7 +80,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
 
   return (
     <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/80 backdrop-blur-sm p-4">
-      <div className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl animate-slide-up overflow-hidden">
+      <div className="w-full max-w-md bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl shadow-2xl animate-slide-up overflow-hidden max-h-[90vh] flex flex-col">
         
         <div className="flex justify-between items-center p-4 border-b border-gray-200 dark:border-gray-800 bg-gray-50 dark:bg-gray-900">
           <h2 className="text-xl font-display font-bold text-gray-900 dark:text-white">Profile Settings</h2>
@@ -88,7 +89,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
           </button>
         </div>
 
-        <div className="p-6 space-y-6">
+        <div className="p-6 space-y-6 overflow-y-auto custom-scrollbar">
           
           {/* Avatar Section */}
           <div className="flex flex-col items-center space-y-3">
@@ -172,9 +173,18 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
             </div>
           </div>
 
-          <Button onClick={handleSave} className="w-full flex items-center justify-center">
-             <Check size={18} className="mr-2" /> Save Changes
-          </Button>
+          <div className="space-y-3 pt-2">
+              <Button onClick={handleSave} className="w-full flex items-center justify-center">
+                 <Check size={18} className="mr-2" /> Save Changes
+              </Button>
+              
+              <button 
+                onClick={onLogout}
+                className="w-full flex items-center justify-center p-2 text-sm text-red-500 hover:bg-red-500/10 rounded-lg border border-transparent hover:border-red-500/30 transition-all"
+              >
+                 <LogOut size={16} className="mr-2" /> Logout
+              </button>
+          </div>
 
         </div>
       </div>

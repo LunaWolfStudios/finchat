@@ -27,6 +27,7 @@ const DATA_DIR = path.join(__dirname, '../data');
 const MEDIA_DIR = path.join(DATA_DIR, 'media');
 const MESSAGES_FILE = path.join(DATA_DIR, 'messages.json');
 const CHANNELS_FILE = path.join(DATA_DIR, 'channels.json');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 // Ensure directories exist
 if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR);
@@ -40,6 +41,7 @@ if (!fs.existsSync(CHANNELS_FILE)) {
   ];
   fs.writeFileSync(CHANNELS_FILE, JSON.stringify(defaultChannels, null, 2));
 }
+if (!fs.existsSync(USERS_FILE)) fs.writeFileSync(USERS_FILE, '{}');
 
 // --- EXPRESS APP SETUP ---
 const app = express();
@@ -107,7 +109,48 @@ const saveChannels = (channels) => {
   }
 };
 
+const getUsers = () => {
+  try {
+    if (!fs.existsSync(USERS_FILE)) return {};
+    return JSON.parse(fs.readFileSync(USERS_FILE, 'utf8'));
+  } catch (err) {
+    return {};
+  }
+};
+
+const saveUsers = (users) => {
+  try {
+    fs.writeFileSync(USERS_FILE, JSON.stringify(users, null, 2));
+  } catch (err) {
+    console.error("Error writing users file:", err);
+  }
+};
+
 // --- HTTP ENDPOINTS ---
+
+// Get User
+app.get('/users/:id', (req, res) => {
+  const users = getUsers();
+  const user = users[req.params.id];
+  if (user) {
+    res.json(user);
+  } else {
+    res.status(404).send("User not found");
+  }
+});
+
+// Create/Update User
+app.post('/users', (req, res) => {
+  const user = req.body;
+  if (!user.id) return res.status(400).send("User ID required");
+  
+  const users = getUsers();
+  // Merge existing data with new data (to preserve fields if not sent)
+  users[user.id] = { ...(users[user.id] || {}), ...user };
+  
+  saveUsers(users);
+  res.json(users[user.id]);
+});
 
 // Get Channels
 app.get('/channels', (req, res) => {
@@ -255,6 +298,9 @@ wss.on('connection', (ws) => {
 
       if (message.action === 'JOIN' || message.action === 'UPDATE_USER') {
         clients.set(ws, message.payload);
+        // Also update backend store if it's a join to ensure freshness
+        // (Implementation skipped here as GET/POST handles persistence, 
+        // this just updates in-memory WS state)
         broadcastUserList();
         return; 
       }

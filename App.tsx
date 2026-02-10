@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { Message, User, MessageType, Channel } from './types';
 import { chatService, generateUUID } from './services/chatService';
-import { STORAGE_KEY_USER, APP_NAME } from './constants';
+import { APP_NAME } from './constants';
 import { MessageBubble } from './components/MessageBubble';
 import { ChatInput } from './components/ChatInput';
 import { ThemeToggle } from './components/ThemeToggle';
@@ -10,6 +10,9 @@ import { SearchPanel } from './components/SearchPanel';
 import { PinnedPanel } from './components/PinnedPanel';
 import { SettingsModal } from './components/SettingsModal';
 import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight, Smartphone, Settings } from 'lucide-react';
+
+// Use a specific key for the session ID to avoid confusion with the old object storage
+const STORAGE_KEY_SESSION_ID = 'finchat_session_id';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -102,10 +105,25 @@ const App: React.FC = () => {
 
   // --- Initial Data Loading ---
   useEffect(() => {
-    const storedUser = localStorage.getItem(STORAGE_KEY_USER);
-    if (storedUser) {
-      setUser(JSON.parse(storedUser));
-    }
+    const initSession = async () => {
+        const sessionId = localStorage.getItem(STORAGE_KEY_SESSION_ID);
+        if (sessionId) {
+            try {
+                // Fetch user profile from server
+                const userProfile = await chatService.getUser(sessionId);
+                if (userProfile) {
+                    setUser(userProfile);
+                    // Socket connection will handle JOIN in the status subscription
+                } else {
+                    // ID invalid or expired on server
+                    localStorage.removeItem(STORAGE_KEY_SESSION_ID);
+                }
+            } catch (e) {
+                console.error("Failed to load user session", e);
+            }
+        }
+    };
+    initSession();
 
     // Load Channels
     const loadChannels = async () => {
@@ -335,17 +353,37 @@ const App: React.FC = () => {
     return msg.type === 'text' ? msg.content : `[${msg.type}]`;
   }, [messages]);
 
-  const handleLogin = (username: string, userId?: string) => {
-    // If userId provided (new device login), use it. Else generate.
-    const newUser: User = { 
-        id: userId || generateUUID(), 
-        username 
-    };
-    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
-    setUser(newUser);
-    if (connectionStatus === 'connected') {
-      chatService.sendJoin(newUser);
+  const handleLogin = async (input: string, isRecovery: boolean) => {
+    if (isRecovery) {
+        // Input is the User ID
+        try {
+            const existingUser = await chatService.getUser(input);
+            if (existingUser) {
+                setUser(existingUser);
+                localStorage.setItem(STORAGE_KEY_SESSION_ID, existingUser.id);
+                chatService.sendJoin(existingUser);
+            } else {
+                alert("User ID not found or invalid.");
+            }
+        } catch (e) {
+            alert("Failed to recover user. Check connection.");
+        }
+    } else {
+        // Input is the Username (Create New)
+        const newUser: User = { 
+            id: generateUUID(), 
+            username: input 
+        };
+        try {
+            await chatService.syncUser(newUser);
+            setUser(newUser);
+            localStorage.setItem(STORAGE_KEY_SESSION_ID, newUser.id);
+            chatService.sendJoin(newUser);
+        } catch (e) {
+            alert("Failed to create user.");
+        }
     }
+
     if ('Notification' in window && Notification.permission !== 'granted' && Notification.permission !== 'denied') {
       Notification.requestPermission().then(perm => {
         setNotificationsEnabled(perm === 'granted');
@@ -353,16 +391,29 @@ const App: React.FC = () => {
     }
   };
 
-  const handleUpdateUser = (updatedUser: User) => {
+  const handleUpdateUser = async (updatedUser: User) => {
     setUser(updatedUser);
-    localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(updatedUser));
-    chatService.updateUser(updatedUser);
+    try {
+        await chatService.syncUser(updatedUser);
+        chatService.updateUser(updatedUser);
+    } catch (e) {
+        console.error("Failed to sync user update", e);
+    }
   };
 
   const handleChangeUsername = () => {
     if (!user || !editNameValue.trim()) return;
     handleUpdateUser({ ...user, username: editNameValue.trim() });
     setIsEditingName(false);
+  };
+
+  const handleLogout = () => {
+      if (confirm("Are you sure you want to log out? You will need your User ID to log back in if you want to keep your history/settings.")) {
+          localStorage.removeItem(STORAGE_KEY_SESSION_ID);
+          setUser(null);
+          setMessages([]);
+          window.location.reload();
+      }
   };
 
   const handleSendMessage = async (content: string, type: MessageType, file?: File) => {
@@ -488,7 +539,8 @@ const App: React.FC = () => {
           <SettingsModal 
             user={user} 
             onClose={() => setIsSettingsOpen(false)} 
-            onUpdateUser={handleUpdateUser} 
+            onUpdateUser={handleUpdateUser}
+            onLogout={handleLogout}
           />
       )}
 

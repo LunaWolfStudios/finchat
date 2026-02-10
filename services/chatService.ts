@@ -92,6 +92,24 @@ class ChatService {
 
   // --- API ---
 
+  async getUser(id: string): Promise<User | null> {
+    try {
+      const res = await fetch(`${CONFIG.API_URL}/users/${id}`);
+      if (!res.ok) return null;
+      return await res.json();
+    } catch (e) { return null; }
+  }
+
+  async syncUser(user: User): Promise<User> {
+    const res = await fetch(`${CONFIG.API_URL}/users`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(user)
+    });
+    if (!res.ok) throw new Error("Failed to sync user");
+    return await res.json();
+  }
+
   async getChannels(): Promise<Channel[]> {
     try {
       const res = await fetch(`${CONFIG.API_URL}/channels`);
