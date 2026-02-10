@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import { Message, User, MessageType, Channel } from './types';
-import { chatService, generateUUID } from './services/chatService';
+import { chatService, generateUUID, TypingEvent } from './services/chatService';
 import { APP_NAME } from './constants';
 import { MessageBubble } from './components/MessageBubble';
 import { ChatInput } from './components/ChatInput';
@@ -38,6 +38,9 @@ const App: React.FC = () => {
   const [isPinnedOpen, setIsPinnedOpen] = useState(false);
   const [isUserListOpen, setIsUserListOpen] = useState(false);
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+
+  // Typing State
+  const [typingUsers, setTypingUsers] = useState<Map<string, string>>(new Map()); // userId -> username
 
   const [replyTo, setReplyTo] = useState<Message | null>(null);
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('connecting');
@@ -177,6 +180,17 @@ const App: React.FC = () => {
         },
         (usersList) => {
             setOnlineUsers(usersList);
+        },
+        (typingEvent: TypingEvent) => {
+            setTypingUsers(prev => {
+                const next = new Map(prev);
+                if (typingEvent.isTyping) {
+                    next.set(typingEvent.userId, typingEvent.username);
+                } else {
+                    next.delete(typingEvent.userId);
+                }
+                return next;
+            });
         }
     );
     return () => unsubscribe();
@@ -199,7 +213,7 @@ const App: React.FC = () => {
       setMessages([]); // Clear previous channel messages immediately
       setHasMoreHistory(true);
       
-      const limit = 200;
+      const limit = 100; // Load 100 messages initially
       const history = await chatService.getMessages(activeChannelId, limit);
       setMessages(history);
       
@@ -218,6 +232,7 @@ const App: React.FC = () => {
 
     if (activeChannelId) {
         fetchHistory();
+        setTypingUsers(new Map()); // Clear typing on channel switch
     }
   }, [activeChannelId]);
 
@@ -263,7 +278,7 @@ const App: React.FC = () => {
     
     setIsLoadingHistory(true);
     const oldestTimestamp = messages[0].timestamp;
-    const limit = 200;
+    const limit = 100; // Load 100 older messages
     
     const olderMessages = await chatService.getMessages(activeChannelId, limit, oldestTimestamp);
     
@@ -476,6 +491,10 @@ const App: React.FC = () => {
       }
   };
 
+  const handleTyping = (isTyping: boolean) => {
+      chatService.sendTyping(isTyping);
+  };
+
   // --- Gestures ---
   const handleTouchStart = (e: React.TouchEvent) => {
     touchStartX.current = e.targetTouches[0].clientX;
@@ -531,6 +550,8 @@ const App: React.FC = () => {
   if (!user) {
     return <LoginModal onLogin={handleLogin} />;
   }
+
+  const typingUserNames = Array.from(typingUsers.values());
 
   return (
     <div className="flex flex-col h-[100dvh] bg-white dark:bg-neon-dark text-gray-900 dark:text-gray-100 transition-colors duration-300 overflow-hidden">
@@ -783,8 +804,10 @@ const App: React.FC = () => {
                         </div>
 
                         <div className="flex flex-col min-w-0 justify-center h-full pt-0.5">
-                            <span className={`truncate leading-none ${u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}`}>
-                                {u.username} {u.id === user.id && <span className="text-[10px] font-normal text-gray-400 ml-1">(You)</span>}
+                            <span className={`truncate leading-none flex items-center ${u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}`}>
+                                {u.username} 
+                                {u.id === user.id && <span className="text-[10px] font-normal text-gray-400 ml-1">(You)</span>}
+                                {typingUsers.has(u.id) && <span className="ml-2 animate-pulse text-neon-cyan tracking-widest text-xs font-bold">...</span>}
                             </span>
                             {u.statusMessage && (
                                 <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{u.statusMessage}</span>
@@ -891,6 +914,7 @@ const App: React.FC = () => {
                      currentUser={user}
                      getReplySnippet={getReplySnippet}
                      authorUser={authorUser}
+                     knownUsers={knownUsers}
                    />
                  );
                })
@@ -898,13 +922,23 @@ const App: React.FC = () => {
              <div ref={messagesEndRef} />
           </div>
 
-          <div className="flex-none pb-safe bg-white dark:bg-gray-900">
+          <div className="flex-none pb-safe bg-white dark:bg-gray-900 relative">
+            {/* Typing Indicator Banner */}
+            {typingUserNames.length > 0 && (
+                <div className="absolute bottom-full left-0 w-full px-4 py-1 text-xs text-gray-500 dark:text-gray-400 bg-gradient-to-t from-white via-white to-transparent dark:from-gray-900 dark:via-gray-900 dark:to-transparent pointer-events-none animate-pulse">
+                    <span className="font-bold text-neon-purple">{typingUserNames.slice(0, 3).join(', ')}</span>
+                    {typingUserNames.length > 3 && `, and ${typingUserNames.length - 3} others`}
+                    {' '}is typing...
+                </div>
+            )}
+            
             <ChatInput 
               onSendMessage={handleSendMessage}
               replyTo={replyTo}
               onCancelReply={() => setReplyTo(null)}
               allUsers={allKnownUsers}
               onlineUsers={onlineUsers}
+              onTyping={handleTyping}
             />
           </div>
         </div>

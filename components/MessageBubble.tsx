@@ -13,6 +13,7 @@ interface MessageBubbleProps {
   currentUser: User | null;
   getReplySnippet?: (id: string) => string;
   authorUser?: User; // New prop for avatar
+  knownUsers?: Map<string, User>; // New prop for reaction names
 }
 
 // --- Rich Text Parser Components ---
@@ -283,7 +284,8 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   scrollToMessage,
   currentUser,
   getReplySnippet,
-  authorUser
+  authorUser,
+  knownUsers
 }) => {
   const [isHovered, setIsHovered] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -659,9 +661,14 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
             <div className="flex flex-wrap gap-1 mt-1">
               {Object.entries(message.reactions).map(([emoji, users]) => {
                 const userIds = users as string[];
+                const userNames = userIds
+                    .map(uid => (uid === currentUser?.id ? 'You' : knownUsers?.get(uid)?.username || 'Unknown'))
+                    .join(', ');
+
                 return (
                   <button 
                     key={emoji}
+                    title={userNames} // Native tooltip
                     onClick={() => handleReaction(emoji)}
                     className={`
                       text-xs px-1.5 py-0.5 rounded-full border flex items-center gap-1 transition-colors

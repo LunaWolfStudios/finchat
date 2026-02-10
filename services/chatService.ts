@@ -18,12 +18,19 @@ const isMobileDevice = () => {
 
 type ConnectionStatus = 'connecting' | 'connected' | 'disconnected';
 
+export interface TypingEvent {
+    userId: string;
+    username: string;
+    isTyping: boolean;
+}
+
 class ChatService {
   private socket: WebSocket | null = null;
   private messageCallback: ((msg: Message) => void) | null = null;
   private updateCallback: ((msg: Message) => void) | null = null;
   private statusCallback: ((status: ConnectionStatus) => void) | null = null;
   private userListCallback: ((users: User[]) => void) | null = null;
+  private typingCallback: ((event: TypingEvent) => void) | null = null;
   
   private connectionState: ConnectionStatus = 'disconnected'; 
   private currentUser: User | null = null;
@@ -50,6 +57,8 @@ class ChatService {
           this.updateCallback(data.payload);
         } else if (data.type === 'USER_LIST' && this.userListCallback) {
           this.userListCallback(data.payload);
+        } else if (data.type === 'TYPING' && this.typingCallback) {
+            this.typingCallback(data.payload);
         }
       } catch (e) { console.error("WS parse error", e); }
     };
@@ -73,12 +82,14 @@ class ChatService {
     onNewMessage: (msg: Message) => void, 
     onStatusChange?: (status: ConnectionStatus) => void,
     onMessageUpdate?: (msg: Message) => void,
-    onUserListUpdate?: (users: User[]) => void
+    onUserListUpdate?: (users: User[]) => void,
+    onTyping?: (event: TypingEvent) => void
   ) {
     this.messageCallback = onNewMessage;
     this.statusCallback = onStatusChange || null;
     this.updateCallback = onMessageUpdate || null;
     this.userListCallback = onUserListUpdate || null;
+    this.typingCallback = onTyping || null;
     
     if (onStatusChange) onStatusChange(this.connectionState);
     
@@ -87,6 +98,7 @@ class ChatService {
       this.statusCallback = null;
       this.updateCallback = null;
       this.userListCallback = null;
+      this.typingCallback = null;
     };
   }
 
@@ -139,7 +151,7 @@ class ChatService {
     return await res.json();
   }
 
-  async getMessages(channelId: string, limit = 200, before?: string): Promise<Message[]> {
+  async getMessages(channelId: string, limit = 100, before?: string): Promise<Message[]> {
     try {
       let url = `${CONFIG.API_URL}/messages?limit=${limit}&channelId=${channelId}`;
       if (before) url += `&before=${encodeURIComponent(before)}`;
@@ -232,6 +244,18 @@ class ChatService {
   sendJoin(user: User) {
     this.currentUser = { ...user, isMobile: isMobileDevice() };
     this.sendToSocket({ action: 'JOIN', payload: this.currentUser });
+  }
+
+  sendTyping(isTyping: boolean) {
+    if (!this.currentUser) return;
+    this.sendToSocket({
+        action: 'TYPING',
+        payload: {
+            userId: this.currentUser.id,
+            username: this.currentUser.username,
+            isTyping
+        }
+    });
   }
 
   updateUser(user: User) {

@@ -202,7 +202,7 @@ app.put('/channels/:id', (req, res) => {
 // Get Messages (Filtered by Channel & Search)
 app.get('/messages', (req, res) => {
   let allMessages = getMessages();
-  const limit = parseInt(req.query.limit) || 200;
+  const limit = parseInt(req.query.limit) || 100; // Default to 100 as requested
   const before = req.query.before;
   const channelId = req.query.channelId;
   const query = req.query.q ? req.query.q.toLowerCase() : null;
@@ -298,11 +298,23 @@ wss.on('connection', (ws) => {
 
       if (message.action === 'JOIN' || message.action === 'UPDATE_USER') {
         clients.set(ws, message.payload);
-        // Also update backend store if it's a join to ensure freshness
-        // (Implementation skipped here as GET/POST handles persistence, 
-        // this just updates in-memory WS state)
         broadcastUserList();
         return; 
+      }
+
+      // Handle Typing
+      if (message.action === 'TYPING') {
+          // Just broadcast to others, don't save
+          const typingMsg = JSON.stringify({
+              type: 'TYPING',
+              payload: message.payload // { userId, username, isTyping }
+          });
+          wss.clients.forEach((client) => {
+              if (client !== ws && client.readyState === 1) {
+                  client.send(typingMsg);
+              }
+          });
+          return;
       }
 
       if (message.action === 'EDIT') {
@@ -315,7 +327,7 @@ wss.on('connection', (ws) => {
             ...payload, 
             reactions: oldMsg.reactions,
             pinned: oldMsg.pinned,
-            pinnedAt: oldMsg.pinnedAt, // Preserve pinned timestamp
+            pinnedAt: oldMsg.pinnedAt, 
             channelId: oldMsg.channelId || 'general'
           };
           saveAllMessages(currentMessages);
@@ -332,7 +344,7 @@ wss.on('connection', (ws) => {
             content: 'Message deleted', 
             type: 'text',
             pinned: false,
-            pinnedAt: undefined // Remove pin timestamp
+            pinnedAt: undefined 
           };
           saveAllMessages(currentMessages);
           broadcastMsg = { type: 'UPDATE_MESSAGE', payload: currentMessages[index] };
@@ -346,10 +358,8 @@ wss.on('connection', (ws) => {
           currentMessages[index].pinned = newPinnedState;
           
           if (newPinnedState) {
-            // Add Timestamp if pinning
             currentMessages[index].pinnedAt = new Date().toISOString();
           } else {
-            // Remove Timestamp if unpinning
             delete currentMessages[index].pinnedAt;
           }
 
@@ -383,7 +393,7 @@ wss.on('connection', (ws) => {
         if (!message.reactions) message.reactions = {};
         if (!message.hiddenPreviews) message.hiddenPreviews = [];
         if (!message.pinned) message.pinned = false;
-        if (!message.channelId) message.channelId = 'general'; // Default to general
+        if (!message.channelId) message.channelId = 'general';
         
         currentMessages.push(message);
         saveAllMessages(currentMessages);

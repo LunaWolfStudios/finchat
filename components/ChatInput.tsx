@@ -8,7 +8,8 @@ interface ChatInputProps {
   replyTo: Message | null;
   onCancelReply: () => void;
   allUsers: User[];
-  onlineUsers: User[]; // Need this for correct status in mentions
+  onlineUsers: User[]; 
+  onTyping: (isTyping: boolean) => void; // New prop
 }
 
 interface PreviewItem {
@@ -18,7 +19,7 @@ interface PreviewItem {
   type: MessageType;
 }
 
-export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, allUsers = [], onlineUsers = [] }) => {
+export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, onCancelReply, allUsers = [], onlineUsers = [], onTyping }) => {
   const [text, setText] = useState('');
   const [previews, setPreviews] = useState<PreviewItem[]>([]);
   
@@ -31,6 +32,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
+  const typingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Auto-focus input when replying
   useEffect(() => {
@@ -152,6 +154,10 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
     setMentionQuery(null);
     if (fileInputRef.current) fileInputRef.current.value = '';
     onCancelReply();
+    
+    // Stop typing
+    if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
+    onTyping(false);
   };
 
   const filteredUsers = mentionQuery !== null 
@@ -184,6 +190,15 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
     const newVal = e.target.value;
     setText(newVal);
     
+    // Typing Indicator Logic
+    if (typingTimeoutRef.current) {
+        clearTimeout(typingTimeoutRef.current);
+    }
+    onTyping(true);
+    typingTimeoutRef.current = setTimeout(() => {
+        onTyping(false);
+    }, 2000); // Stop typing after 2s of inactivity
+
     // Logic for @mentions
     const cursor = e.target.selectionStart;
     const textBeforeCursor = newVal.slice(0, cursor);
