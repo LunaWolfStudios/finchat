@@ -165,8 +165,11 @@ const App: React.FC = () => {
                 const container = scrollContainerRef.current;
                 if (container) {
                     const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
-                    // If user is near bottom (within 150px), stick to bottom
-                    if (distanceFromBottom < 150) {
+                    
+                    // Force stick to bottom if it's our own message or if we are already close to bottom
+                    const isOwnMessage = user && newMessage.userId === user.id;
+
+                    if (isOwnMessage || distanceFromBottom < 150) {
                         scrollMode.current = 'stick';
                     } else {
                         scrollMode.current = 'none';
@@ -375,7 +378,8 @@ const App: React.FC = () => {
     // Aggressively ensure bottom for initial loads or new messages to account for image loading/layout shifts
     if (scrollMode.current === 'force-bottom' || scrollMode.current === 'stick') {
         // Multiple timeouts to catch various loading stages (e.g. slight render delays, image layout calc)
-        const timeouts = [50, 150, 300, 600];
+        // Added 800ms to allow for mobile keyboard close animations
+        const timeouts = [50, 150, 300, 600, 800];
         timeouts.forEach(t => setTimeout(() => {
              if (scrollContainerRef.current && (scrollMode.current === 'force-bottom' || scrollMode.current === 'stick')) {
                   scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
