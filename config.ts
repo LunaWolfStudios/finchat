@@ -7,10 +7,10 @@ const API_PORT = 4000;
 
 export const CONFIG = {
   // The HTTP API URL for history and uploads
-  API_URL: `http://${HOST}/api/`,
+  API_URL: `https://${HOST}/api/`,
   
   // The WebSocket URL for real-time chat
-  WS_URL: `ws://${HOST}/ws/`,
+  WS_URL: `wss://${HOST}/ws/`,
   
   // Constraints
   MAX_FILE_SIZE_BYTES: 100 * 1024 * 1024, // 100MB
