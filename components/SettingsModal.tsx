@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Upload, User as UserIcon, Check, Copy, Eye, EyeOff } from 'lucide-react';
+import { X, Upload, User as UserIcon, Check, Copy, Eye, EyeOff, Fish } from 'lucide-react';
 import { User } from '../types';
 import { Button } from './Button';
 import { chatService } from '../services/chatService';
@@ -17,6 +17,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
   const [isUploading, setIsUploading] = useState(false);
   const [showUserId, setShowUserId] = useState(false);
   const [isCopied, setIsCopied] = useState(false);
+  const [imgError, setImgError] = useState(false);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -28,6 +29,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
         // Reuse uploadFile service
         const url = await chatService.uploadFile(file);
         setAvatar(url);
+        setImgError(false);
       } catch (err) {
         alert("Failed to upload image");
       } finally {
@@ -41,16 +43,38 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
     onUpdateUser({ 
         ...user, 
         username: username.trim(), 
-        avatar,
+        avatar: imgError ? undefined : avatar, // If error, clear avatar? or keep it but it won't show
         statusMessage: statusMessage.trim()
     });
     onClose();
   };
 
   const copyUserId = () => {
-      navigator.clipboard.writeText(user.id);
-      setIsCopied(true);
-      setTimeout(() => setIsCopied(false), 2000);
+      const onSuccess = () => {
+          setIsCopied(true);
+          setTimeout(() => setIsCopied(false), 2000);
+      };
+      
+      if (navigator.clipboard && window.isSecureContext) {
+          navigator.clipboard.writeText(user.id).then(onSuccess).catch(() => fallbackCopy(user.id, onSuccess));
+      } else {
+          fallbackCopy(user.id, onSuccess);
+      }
+  };
+
+  const fallbackCopy = (text: string, onSuccess: () => void) => {
+      const textArea = document.createElement("textarea");
+      textArea.value = text;
+      textArea.style.position = "fixed";
+      textArea.style.left = "-9999px";
+      document.body.appendChild(textArea);
+      textArea.focus();
+      textArea.select();
+      try {
+          document.execCommand('copy');
+          onSuccess();
+      } catch (err) {}
+      document.body.removeChild(textArea);
   };
 
   return (
@@ -70,10 +94,15 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
           <div className="flex flex-col items-center space-y-3">
              <div className="relative group cursor-pointer" onClick={() => fileInputRef.current?.click()}>
                 <div className="w-24 h-24 rounded-full overflow-hidden border-2 border-neon-cyan shadow-[0_0_15px_rgba(0,255,255,0.3)] bg-gray-800 flex items-center justify-center">
-                    {avatar ? (
-                        <img src={avatar} alt="Avatar" className="w-full h-full object-cover" />
+                    {avatar && !imgError ? (
+                        <img 
+                            src={avatar} 
+                            alt="Avatar" 
+                            className="w-full h-full object-cover" 
+                            onError={() => setImgError(true)}
+                        />
                     ) : (
-                        <UserIcon size={40} className="text-gray-500" />
+                        <Fish size={40} className="text-gray-500" />
                     )}
                 </div>
                 <div className="absolute inset-0 bg-black/50 rounded-full flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
@@ -119,7 +148,7 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
             <div className="bg-gray-100 dark:bg-black/30 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
                 <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">User ID (Keep Secret)</label>
                 <div className="flex items-center space-x-2">
-                    <div className="flex-1 font-mono text-sm bg-gray-200 dark:bg-black/50 p-2 rounded text-gray-700 dark:text-gray-300 truncate">
+                    <div className="flex-1 font-mono text-[10px] sm:text-xs bg-gray-200 dark:bg-black/50 p-2 rounded text-gray-700 dark:text-gray-300 truncate">
                         {showUserId ? user.id : '••••••••-••••-••••-••••-••••••••••••'}
                     </div>
                     <button 

@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Message, LinkPreview, User } from '../types';
-import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check, FileText, Download, Pin } from 'lucide-react';
+import { Edit2, Trash2, Reply, ExternalLink, Smile, X, Copy, Check, FileText, Download, Pin, Fish } from 'lucide-react';
 import { chatService } from '../services/chatService';
 
 interface MessageBubbleProps {
@@ -224,7 +224,13 @@ const DEFAULT_EMOJIS = [
   '🎵', '🎮', '👾', '🌈', '✅', '❌'
 ];
 
-const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () => void }> = ({ onSelect, onClose }) => {
+interface ReactionPickerProps {
+    onSelect: (emoji: string) => void; 
+    onClose: () => void;
+    position?: 'top' | 'bottom';
+}
+
+const ReactionPicker: React.FC<ReactionPickerProps> = ({ onSelect, onClose, position = 'top' }) => {
   const [recents, setRecents] = useState<string[]>([]);
 
   useEffect(() => {
@@ -238,8 +244,10 @@ const ReactionPicker: React.FC<{ onSelect: (emoji: string) => void; onClose: () 
     onClose();
   };
 
+  const positionClass = position === 'top' ? 'bottom-full mb-2' : 'top-full mt-2';
+
   return (
-    <div className="absolute bottom-full mb-2 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up">
+    <div className={`absolute ${positionClass} left-0 bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-600 rounded-lg p-3 shadow-2xl z-50 w-64 animate-slide-up`}>
       <div className="flex justify-between items-center mb-2 pb-1 border-b border-gray-200 dark:border-gray-700">
         <span className="text-[10px] uppercase font-bold text-gray-500 dark:text-gray-400 tracking-wider">Reactions</span>
         <button onClick={onClose} className="text-gray-500 dark:text-gray-400 hover:text-black dark:hover:text-white"><XIcon size={14}/></button>
@@ -281,8 +289,10 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
   const [isEditing, setIsEditing] = useState(false);
   const [editContent, setEditContent] = useState(message.content);
   const [showReactionPicker, setShowReactionPicker] = useState(false);
+  const [pickerPos, setPickerPos] = useState<'top' | 'bottom'>('top');
   const [recentEmojis, setRecentEmojis] = useState<string[]>([]);
   const [isCopied, setIsCopied] = useState(false);
+  const [imgError, setImgError] = useState(false);
   
   // Mobile Interaction State
   const [showMobileOptions, setShowMobileOptions] = useState(false);
@@ -299,6 +309,12 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
       }
     }
   }, [isHovered, showReactionPicker, showMobileOptions]);
+
+  // Handle Avatar Update
+  useEffect(() => {
+      // Reset error if avatar URL changes
+      if (authorUser?.avatar) setImgError(false);
+  }, [authorUser?.avatar]);
 
   const handleSaveEdit = () => {
     if (editContent.trim() !== message.content) {
@@ -328,6 +344,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
     setRecentEmojis(newRecents.slice(0, 3));
     
     handleReaction(emoji);
+  };
+
+  const toggleReactionPicker = (e: React.MouseEvent) => {
+      e.stopPropagation();
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const spaceAbove = rect.top;
+      // If less than 250px above, show below
+      setPickerPos(spaceAbove < 250 ? 'bottom' : 'top');
+      setShowReactionPicker(!showReactionPicker);
   };
   
   const handleRemovePreview = (url: string) => {
@@ -464,13 +489,19 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
         onMouseLeave={() => setIsHovered(false)}
         id={`msg-${message.id}`}
       >
-        {/* Avatar */}
-        <div className={`flex-none ${isOwnMessage ? 'ml-2' : 'mr-2'} self-end mb-1`}>
-            {authorUser?.avatar ? (
-                <img src={authorUser.avatar} alt={authorUser.username} className="w-8 h-8 rounded-full object-cover border border-gray-300 dark:border-gray-700" />
+        {/* Avatar aligned to top (self-start) but shifted down to align with message bubble */}
+        <div className={`flex-none ${isOwnMessage ? 'ml-2' : 'mr-2'} self-start mt-6`}>
+            {authorUser?.avatar && !imgError ? (
+                <img 
+                    src={authorUser.avatar} 
+                    alt={authorUser.username} 
+                    className="w-8 h-8 rounded-full object-cover border border-gray-300 dark:border-gray-700" 
+                    onError={() => setImgError(true)}
+                />
             ) : (
                 <div className="w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-[10px] font-bold text-white uppercase border border-gray-300 dark:border-gray-700">
-                    {message.username.substring(0, 2)}
+                     {/* Show Fish Logo if avatar fails/missing, or initials? User requested Logo icon fallback */}
+                     {imgError ? <Fish size={14} /> : message.username.substring(0, 2)}
                 </div>
             )}
         </div>
@@ -567,11 +598,15 @@ export const MessageBubble: React.FC<MessageBubbleProps> = ({
                   {recentEmojis.length > 0 && <div className="w-px h-4 bg-gray-300 dark:bg-gray-700 mx-0.5"></div>}
 
                   <div className="relative">
-                    <button onClick={() => setShowReactionPicker(!showReactionPicker)} className="p-1 hover:text-yellow-600 dark:hover:text-yellow-400 text-gray-500 dark:text-gray-400" title="React">
+                    <button onClick={toggleReactionPicker} className="p-1 hover:text-yellow-600 dark:hover:text-yellow-400 text-gray-500 dark:text-gray-400" title="React">
                       <Smile size={16} />
                     </button>
                     {showReactionPicker && (
-                      <ReactionPicker onSelect={handleEmojiSelect} onClose={() => setShowReactionPicker(false)} />
+                      <ReactionPicker 
+                        onSelect={handleEmojiSelect} 
+                        onClose={() => setShowReactionPicker(false)} 
+                        position={pickerPos}
+                      />
                     )}
                   </div>
 

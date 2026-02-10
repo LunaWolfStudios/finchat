@@ -54,6 +54,7 @@ const App: React.FC = () => {
   // Pagination
   const [isLoadingHistory, setIsLoadingHistory] = useState(false);
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  const [headerImgError, setHeaderImgError] = useState(false);
 
   // Swipe Gestures
   const touchStartX = useRef<number>(0);
@@ -117,6 +118,11 @@ const App: React.FC = () => {
     };
     loadChannels();
   }, []);
+
+  // Update header fallback on avatar change
+  useEffect(() => {
+     if (user?.avatar) setHeaderImgError(false);
+  }, [user?.avatar]);
 
   const activeChannelRef = useRef(activeChannelId);
   useEffect(() => { activeChannelRef.current = activeChannelId; }, [activeChannelId]);
@@ -493,8 +499,13 @@ const App: React.FC = () => {
             onClick={() => setIsSettingsOpen(true)}
             className="w-10 h-10 rounded-full cursor-pointer overflow-hidden bg-gradient-to-br from-neon-cyan to-neon-purple flex items-center justify-center shadow-[0_0_10px_rgba(0,255,255,0.4)] hover:scale-105 transition-transform"
           >
-             {user.avatar ? (
-                 <img src={user.avatar} alt="Profile" className="w-full h-full object-cover" />
+             {user.avatar && !headerImgError ? (
+                 <img 
+                    src={user.avatar} 
+                    alt="Profile" 
+                    className="w-full h-full object-cover" 
+                    onError={() => setHeaderImgError(true)}
+                 />
              ) : (
                  <Fish className="text-white" />
              )}
@@ -669,7 +680,13 @@ const App: React.FC = () => {
                                       )}
 
                                       {activeChannelId === c.id ? (
-                                        <ChevronRight size={14} className="ml-auto opacity-50"/> 
+                                          // Allow settings access even on active channel
+                                          <div 
+                                              onClick={(e) => { e.stopPropagation(); setEditingChannelId(c.id); setEditChannelName(c.name); }}
+                                              className="ml-auto opacity-0 group-hover/channel:opacity-100 p-1 hover:text-neon-purple transition-opacity"
+                                          >
+                                              <Settings size={12} />
+                                          </div>
                                       ) : (
                                         <div 
                                             onClick={(e) => { e.stopPropagation(); setEditingChannelId(c.id); setEditChannelName(c.name); }}
@@ -703,9 +720,14 @@ const App: React.FC = () => {
                                     {u.username.substring(0,2)}
                                 </div>
                             )}
-                            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-[#0f1422] flex items-center justify-center bg-green-500">
-                                {u.isMobile && <Smartphone size={8} className="text-white" />}
-                            </div>
+                            {/* Status Overlay: Mobile Icon or Green Dot */}
+                            {u.isMobile ? (
+                                <div className="absolute -bottom-1 -right-1 bg-black/50 rounded-full p-0.5 border border-black">
+                                    <Smartphone size={10} className="text-green-500 fill-current" />
+                                </div>
+                            ) : (
+                                <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-[#0f1422] flex items-center justify-center bg-green-500"></div>
+                            )}
                         </div>
 
                         <div className="flex flex-col min-w-0 justify-center h-full pt-0.5">

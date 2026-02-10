@@ -187,7 +187,7 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
     // Logic for @mentions
     const cursor = e.target.selectionStart;
     const textBeforeCursor = newVal.slice(0, cursor);
-    const lastWordMatch = textBeforeCursor.match(/@(\w*)$/);
+    const lastWordMatch = textBeforeCursor.match(/@([\w.-]*)$/);
 
     if (lastWordMatch) {
       setMentionQuery(lastWordMatch[1]);
@@ -238,9 +238,9 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
                         </div>
                     )}
                     
-                    {/* Status Dot Overlay */}
+                    {/* Status Dot/Icon Overlay */}
                     {isOnline && (
-                        <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white dark:border-gray-800 flex items-center justify-center bg-green-500`}>
+                        <div className={`absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border border-white dark:border-gray-800 flex items-center justify-center bg-green-500`}>
                            {mobileStatus && <Smartphone size={8} className="text-white" />}
                         </div>
                     )}
