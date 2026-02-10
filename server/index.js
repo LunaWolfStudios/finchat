@@ -36,7 +36,7 @@ if (!fs.existsSync(MEDIA_DIR)) fs.mkdirSync(MEDIA_DIR, { recursive: true });
 if (!fs.existsSync(MESSAGES_FILE)) fs.writeFileSync(MESSAGES_FILE, '[]');
 if (!fs.existsSync(CHANNELS_FILE)) {
   const defaultChannels = [
-    { id: 'general', name: 'general', description: 'The lobby', createdAt: new Date().toISOString() }
+    { id: 'general', name: 'general', description: 'The lobby', createdAt: new Date().toISOString(), order: 0 }
   ];
   fs.writeFileSync(CHANNELS_FILE, JSON.stringify(defaultChannels, null, 2));
 }
@@ -91,7 +91,9 @@ const saveAllMessages = (messages) => {
 const getChannels = () => {
   try {
     if (!fs.existsSync(CHANNELS_FILE)) return [];
-    return JSON.parse(fs.readFileSync(CHANNELS_FILE, 'utf8'));
+    let channels = JSON.parse(fs.readFileSync(CHANNELS_FILE, 'utf8'));
+    // Sort by order
+    return channels.sort((a, b) => (a.order || 0) - (b.order || 0));
   } catch (err) {
     return [];
   }
@@ -127,12 +129,31 @@ app.post('/channels', (req, res) => {
     id: Date.now().toString(36),
     name,
     description: description || '',
-    createdAt: new Date().toISOString()
+    createdAt: new Date().toISOString(),
+    order: channels.length
   };
   
   channels.push(newChannel);
   saveChannels(channels);
   res.json(newChannel);
+});
+
+// Update Channel (Rename / Reorder)
+app.put('/channels/:id', (req, res) => {
+    const { id } = req.params;
+    const { name, order } = req.body;
+    
+    let channels = getChannels();
+    const index = channels.findIndex(c => c.id === id);
+    
+    if (index === -1) return res.status(404).send("Channel not found");
+    
+    // Update fields
+    if (name) channels[index].name = name;
+    if (order !== undefined) channels[index].order = order;
+
+    saveChannels(channels);
+    res.json(channels[index]);
 });
 
 // Get Messages (Filtered by Channel & Search)
@@ -213,6 +234,7 @@ const clients = new Map(); // ws -> user
 const broadcastUserList = () => {
   const users = Array.from(clients.values()).filter(u => u !== null);
   const uniqueUsersMap = new Map();
+  // De-duplicate by ID so multiple tabs show as one user
   users.forEach(u => uniqueUsersMap.set(u.id, u));
   const uniqueUsers = Array.from(uniqueUsersMap.values());
   const msg = JSON.stringify({ type: 'USER_LIST', payload: uniqueUsers });

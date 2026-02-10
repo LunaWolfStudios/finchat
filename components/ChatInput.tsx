@@ -231,25 +231,22 @@ export const ChatInput: React.FC<ChatInputProps> = ({ onSendMessage, replyTo, on
                 {/* Avatar / Initials */}
                 <div className="relative">
                     {u.avatar ? (
-                        <img src={u.avatar} alt={u.username} className="w-5 h-5 rounded-full object-cover" />
+                        <img src={u.avatar} alt={u.username} className="w-6 h-6 rounded-full object-cover" />
                     ) : (
-                        <div className="w-5 h-5 rounded-full bg-gray-500 flex items-center justify-center text-[8px] font-bold text-white uppercase">
+                        <div className="w-6 h-6 rounded-full bg-gray-500 flex items-center justify-center text-[8px] font-bold text-white uppercase">
                             {u.username.substring(0,2)}
                         </div>
                     )}
                     
-                    {/* Status Dot for Avatar */}
+                    {/* Status Dot Overlay */}
                     {isOnline && (
-                        <div className={`absolute -bottom-0.5 -right-0.5 w-2 h-2 rounded-full border border-white dark:border-gray-800 flex items-center justify-center bg-green-500`}></div>
+                        <div className={`absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 rounded-full border border-white dark:border-gray-800 flex items-center justify-center bg-green-500`}>
+                           {mobileStatus && <Smartphone size={8} className="text-white" />}
+                        </div>
                     )}
                 </div>
 
-                <span className="flex-1">{u.username}</span>
-
-                {/* Status Icon Text */}
-                {isOnline && (
-                    mobileStatus ? <Smartphone size={12} className="text-green-500" /> : <div className="w-2 h-2 rounded-full bg-green-500"></div>
-                )}
+                <span className="flex-1 truncate">{u.username}</span>
               </button>
             );
           })}

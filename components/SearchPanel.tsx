@@ -45,6 +45,9 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
         // Additional client-side filtering for Author/Date/Type 
         // (Since server currently primarily handles 'q' and 'channelId')
         const refined = searchResults.filter(msg => {
+           // Exclude deleted messages
+           if (msg.deleted) return false;
+
            let matches = true;
            if (author && !msg.username.toLowerCase().includes(author.toLowerCase())) matches = false;
            
@@ -215,8 +218,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
                 <span className="text-[10px] text-gray-500">{new Date(msg.timestamp).toLocaleDateString()}</span>
               </div>
               <div className="text-sm text-gray-800 dark:text-gray-300 line-clamp-3 mt-1">
-                {msg.deleted ? <span className="italic text-gray-500">Deleted message</span> : 
-                 msg.type === 'image' ? <span className="text-gray-400 italic flex items-center gap-1">Image Upload</span> :
+                {msg.type === 'image' ? <span className="text-gray-400 italic flex items-center gap-1">Image Upload</span> :
                  msg.type === 'video' ? <span className="text-gray-400 italic flex items-center gap-1">Video Upload</span> :
                  msg.type === 'audio' ? <span className="text-gray-400 italic flex items-center gap-1">Audio Upload</span> :
                  msg.content

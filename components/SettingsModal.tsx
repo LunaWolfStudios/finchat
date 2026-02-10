@@ -1,5 +1,5 @@
 import React, { useState, useRef } from 'react';
-import { X, Upload, User as UserIcon, Check } from 'lucide-react';
+import { X, Upload, User as UserIcon, Check, Copy, Eye, EyeOff } from 'lucide-react';
 import { User } from '../types';
 import { Button } from './Button';
 import { chatService } from '../services/chatService';
@@ -12,8 +12,12 @@ interface SettingsModalProps {
 
 export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onUpdateUser }) => {
   const [username, setUsername] = useState(user.username);
+  const [statusMessage, setStatusMessage] = useState(user.statusMessage || '');
   const [avatar, setAvatar] = useState(user.avatar || '');
   const [isUploading, setIsUploading] = useState(false);
+  const [showUserId, setShowUserId] = useState(false);
+  const [isCopied, setIsCopied] = useState(false);
+
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -34,8 +38,19 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
 
   const handleSave = () => {
     if (!username.trim()) return;
-    onUpdateUser({ ...user, username: username.trim(), avatar });
+    onUpdateUser({ 
+        ...user, 
+        username: username.trim(), 
+        avatar,
+        statusMessage: statusMessage.trim()
+    });
     onClose();
+  };
+
+  const copyUserId = () => {
+      navigator.clipboard.writeText(user.id);
+      setIsCopied(true);
+      setTimeout(() => setIsCopied(false), 2000);
   };
 
   return (
@@ -74,16 +89,58 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({ user, onClose, onU
              <input type="file" ref={fileInputRef} className="hidden" accept="image/*" onChange={handleFileSelect} />
           </div>
 
-          {/* Username Section */}
-          <div>
-              <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Display Name</label>
-              <input 
-                 type="text" 
-                 value={username} 
-                 onChange={(e) => setUsername(e.target.value)}
-                 maxLength={20}
-                 className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:ring-1 focus:ring-neon-cyan outline-none"
-              />
+          <div className="space-y-4">
+            {/* Username Section */}
+            <div>
+                <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Display Name</label>
+                <input 
+                   type="text" 
+                   value={username} 
+                   onChange={(e) => setUsername(e.target.value)}
+                   maxLength={20}
+                   className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:ring-1 focus:ring-neon-cyan outline-none"
+                />
+            </div>
+
+            {/* Status Section */}
+            <div>
+                <label className="block text-xs font-bold uppercase text-gray-500 mb-1">Status Message</label>
+                <input 
+                   type="text" 
+                   value={statusMessage} 
+                   onChange={(e) => setStatusMessage(e.target.value)}
+                   maxLength={50}
+                   placeholder="What's on your mind?"
+                   className="w-full bg-gray-100 dark:bg-gray-800 border border-gray-300 dark:border-gray-700 rounded-lg p-3 text-gray-900 dark:text-white focus:ring-1 focus:ring-neon-cyan outline-none text-sm"
+                />
+            </div>
+
+            {/* User ID Section */}
+            <div className="bg-gray-100 dark:bg-black/30 p-3 rounded-lg border border-gray-200 dark:border-gray-700">
+                <label className="block text-[10px] font-bold uppercase text-gray-500 mb-1">User ID (Keep Secret)</label>
+                <div className="flex items-center space-x-2">
+                    <div className="flex-1 font-mono text-sm bg-gray-200 dark:bg-black/50 p-2 rounded text-gray-700 dark:text-gray-300 truncate">
+                        {showUserId ? user.id : '••••••••-••••-••••-••••-••••••••••••'}
+                    </div>
+                    <button 
+                        onClick={() => setShowUserId(!showUserId)}
+                        className="p-2 text-gray-500 hover:text-neon-cyan"
+                        title={showUserId ? "Hide ID" : "Show ID"}
+                    >
+                        {showUserId ? <EyeOff size={16} /> : <Eye size={16} />}
+                    </button>
+                    {showUserId && (
+                        <button 
+                            onClick={copyUserId}
+                            className="p-2 text-gray-500 hover:text-green-400"
+                            title="Copy ID"
+                        >
+                            {isCopied ? <Check size={16} /> : <Copy size={16} />}
+                        </button>
+                    )}
+                </div>
+                <p className="text-[10px] text-gray-500 mt-1">Use this ID to log in on other devices.</p>
+            </div>
           </div>
 
           <Button onClick={handleSave} className="w-full flex items-center justify-center">

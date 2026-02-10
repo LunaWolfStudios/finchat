@@ -6,6 +6,7 @@ export interface User {
   color?: string;
   isMobile?: boolean; 
   avatar?: string; // URL to avatar image
+  statusMessage?: string; // Custom status text
 }
 
 export interface Channel {
@@ -13,6 +14,7 @@ export interface Channel {
   name: string;
   description?: string;
   createdAt: string;
+  order?: number;
 }
 
 export interface Message {

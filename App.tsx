@@ -9,7 +9,7 @@ import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
 import { PinnedPanel } from './components/PinnedPanel';
 import { SettingsModal } from './components/SettingsModal';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight, Smartphone } from 'lucide-react';
+import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight, Smartphone, Settings } from 'lucide-react';
 
 const App: React.FC = () => {
   const [user, setUser] = useState<User | null>(null);
@@ -20,6 +20,13 @@ const App: React.FC = () => {
   const [activeChannelId, setActiveChannelId] = useState<string>('general');
   const [isCreatingChannel, setIsCreatingChannel] = useState(false);
   const [newChannelName, setNewChannelName] = useState('');
+  
+  // Channel Rename State
+  const [editingChannelId, setEditingChannelId] = useState<string | null>(null);
+  const [editChannelName, setEditChannelName] = useState('');
+
+  // Unread Mentions
+  const [unreadMentions, setUnreadMentions] = useState<{ [channelId: string]: number }>({});
 
   const [onlineUsers, setOnlineUsers] = useState<User[]>([]);
   const [knownUsers, setKnownUsers] = useState<Map<string, User>>(new Map()); // id -> User Object
@@ -37,7 +44,7 @@ const App: React.FC = () => {
     localStorage.getItem('finchat_last_pin_view') || new Date(0).toISOString()
   );
 
-  // Username Edit State
+  // Username Edit State (Top Bar)
   const [isEditingName, setIsEditingName] = useState(false);
   const [editNameValue, setEditNameValue] = useState('');
 
@@ -120,7 +127,14 @@ const App: React.FC = () => {
         (newMessage) => {
             if (newMessage.channelId === activeChannelRef.current) {
                 setMessages(prev => [...prev, newMessage]);
+            } else if (user && newMessage.content.includes(`@${user.username}`)) {
+                 // Mention in another channel
+                 setUnreadMentions(prev => ({
+                     ...prev,
+                     [newMessage.channelId]: (prev[newMessage.channelId] || 0) + 1
+                 }));
             }
+
             // Handle notifications regardless of channel if mentioned
             if (user && newMessage.userId !== user.id && newMessage.content.includes(`@${user.username}`) && notificationsEnabled) {
                 new Notification(`${newMessage.username} in #${channels.find(c=>c.id===newMessage.channelId)?.name || 'unknown'}`, {
@@ -147,6 +161,15 @@ const App: React.FC = () => {
 
   // --- Channel Switching & History ---
   useEffect(() => {
+    // Clear unread mentions for this channel
+    if (unreadMentions[activeChannelId]) {
+        setUnreadMentions(prev => {
+            const next = { ...prev };
+            delete next[activeChannelId];
+            return next;
+        });
+    }
+
     const fetchHistory = async () => {
       setIsLoadingHistory(true);
       setMessages([]); // Clear previous channel messages immediately
@@ -180,21 +203,20 @@ const App: React.FC = () => {
          const next = new Map(prev);
          let changed = false;
          
-         // Add from messages (might miss mobile info if not in message, but generic info persists)
+         // Add from messages
          messages.forEach(m => {
              const existing = next.get(m.userId);
-             // Basic user info if missing
              if (!existing) {
                  next.set(m.userId, { id: m.userId, username: m.username });
                  changed = true;
              }
          });
          
-         // Add from online users (Contains mobile info & avatar)
+         // Add from online users
          onlineUsers.forEach(u => {
              const existing = next.get(u.id);
-             // Update if new info (especially avatar)
-             if (!existing || existing.avatar !== u.avatar || existing.username !== u.username) {
+             // Update if new info (avatar/status)
+             if (!existing || existing.avatar !== u.avatar || existing.username !== u.username || existing.statusMessage !== u.statusMessage) {
                  next.set(u.id, u);
                  changed = true;
              }
@@ -245,6 +267,21 @@ const App: React.FC = () => {
     }
   };
 
+  const renameChannel = async () => {
+      if (!editingChannelId || !editChannelName.trim()) return;
+      try {
+          const channel = channels.find(c => c.id === editingChannelId);
+          if (channel) {
+             const updated = await chatService.updateChannel({ ...channel, name: editChannelName.trim() });
+             setChannels(prev => prev.map(c => c.id === updated.id ? updated : c));
+          }
+          setEditingChannelId(null);
+          setEditChannelName('');
+      } catch (e) {
+          alert("Failed to rename channel");
+      }
+  };
+
   // Derive Offline Users
   const offlineUsers = useMemo(() => {
     const onlineIds = new Set(onlineUsers.map(u => u.id));
@@ -292,8 +329,12 @@ const App: React.FC = () => {
     return msg.type === 'text' ? msg.content : `[${msg.type}]`;
   }, [messages]);
 
-  const handleLogin = (username: string) => {
-    const newUser: User = { id: generateUUID(), username };
+  const handleLogin = (username: string, userId?: string) => {
+    // If userId provided (new device login), use it. Else generate.
+    const newUser: User = { 
+        id: userId || generateUUID(), 
+        username 
+    };
     localStorage.setItem(STORAGE_KEY_USER, JSON.stringify(newUser));
     setUser(newUser);
     if (connectionStatus === 'connected') {
@@ -399,6 +440,35 @@ const App: React.FC = () => {
         setIsUserListOpen(false);
       }
     }
+  };
+
+  // --- Drag and Drop Channels ---
+  const handleDragStart = (e: React.DragEvent, index: number) => {
+      e.dataTransfer.setData("text/plain", index.toString());
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+      e.preventDefault();
+  };
+
+  const handleDrop = async (e: React.DragEvent, dropIndex: number) => {
+      const dragIndex = parseInt(e.dataTransfer.getData("text/plain"));
+      if (dragIndex === dropIndex) return;
+
+      const newChannels = [...channels];
+      const [draggedItem] = newChannels.splice(dragIndex, 1);
+      newChannels.splice(dropIndex, 0, draggedItem);
+      
+      // Optimistic update
+      setChannels(newChannels);
+      
+      // Sync Order to Server
+      for (let i = 0; i < newChannels.length; i++) {
+          const c = newChannels[i];
+          if (c.order !== i) {
+              await chatService.updateChannel({ ...c, order: i });
+          }
+      }
   };
 
   if (!user) {
@@ -559,20 +629,57 @@ const App: React.FC = () => {
                   )}
 
                   <ul className="space-y-1">
-                      {channels.map(c => (
-                          <li key={c.id}>
-                              <button
-                                  onClick={() => { setActiveChannelId(c.id); setIsUserListOpen(false); }}
-                                  className={`w-full flex items-center px-3 py-2 rounded-lg text-sm transition-all ${
-                                      activeChannelId === c.id 
-                                      ? 'bg-cyan-100 dark:bg-neon-cyan/10 text-cyan-700 dark:text-neon-cyan font-bold shadow-[0_0_10px_rgba(0,255,255,0.1)]' 
-                                      : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
-                                  }`}
-                              >
-                                  <Hash size={14} className="mr-2 opacity-70" />
-                                  <span className="truncate">{c.name}</span>
-                                  {activeChannelId === c.id && <ChevronRight size={14} className="ml-auto opacity-50"/>}
-                              </button>
+                      {channels.map((c, index) => (
+                          <li 
+                            key={c.id}
+                            draggable
+                            onDragStart={(e) => handleDragStart(e, index)}
+                            onDragOver={handleDragOver}
+                            onDrop={(e) => handleDrop(e, index)}
+                            className="group/channel relative"
+                          >
+                              {editingChannelId === c.id ? (
+                                  <div className="flex items-center px-2 py-1 bg-white dark:bg-gray-800 rounded">
+                                      <input 
+                                          autoFocus
+                                          value={editChannelName}
+                                          onChange={(e) => setEditChannelName(e.target.value)}
+                                          className="w-full bg-transparent text-sm border-b border-gray-500 focus:border-neon-cyan outline-none"
+                                          onKeyDown={(e) => e.key === 'Enter' && renameChannel()}
+                                          onBlur={renameChannel}
+                                      />
+                                  </div>
+                              ) : (
+                                  <button
+                                      onClick={() => { setActiveChannelId(c.id); setIsUserListOpen(false); }}
+                                      className={`w-full flex items-center px-3 py-2 rounded-lg text-sm transition-all relative ${
+                                          activeChannelId === c.id 
+                                          ? 'bg-cyan-100 dark:bg-neon-cyan/10 text-cyan-700 dark:text-neon-cyan font-bold shadow-[0_0_10px_rgba(0,255,255,0.1)]' 
+                                          : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200 dark:hover:bg-white/5 hover:text-gray-900 dark:hover:text-white'
+                                      }`}
+                                  >
+                                      <Hash size={14} className="mr-2 opacity-70" />
+                                      <span className="truncate">{c.name}</span>
+                                      
+                                      {/* Unread Mention Badge */}
+                                      {unreadMentions[c.id] > 0 && activeChannelId !== c.id && (
+                                          <span className="absolute right-8 w-4 h-4 bg-red-500 rounded-full text-[10px] flex items-center justify-center text-white font-bold animate-pulse">
+                                              {unreadMentions[c.id]}
+                                          </span>
+                                      )}
+
+                                      {activeChannelId === c.id ? (
+                                        <ChevronRight size={14} className="ml-auto opacity-50"/> 
+                                      ) : (
+                                        <div 
+                                            onClick={(e) => { e.stopPropagation(); setEditingChannelId(c.id); setEditChannelName(c.name); }}
+                                            className="ml-auto opacity-0 group-hover/channel:opacity-100 p-1 hover:text-neon-purple transition-opacity"
+                                        >
+                                            <Settings size={12} />
+                                        </div>
+                                      )}
+                                  </button>
+                              )}
                           </li>
                       ))}
                   </ul>
@@ -584,18 +691,31 @@ const App: React.FC = () => {
                     <span className="text-green-600 dark:text-green-500">Online</span>
                     <span className="bg-green-100 dark:bg-green-500/10 text-green-600 dark:text-green-500 px-1.5 rounded-full text-[10px]">{onlineUsers.length}</span>
                   </h2>
-                  <ul className="space-y-2">
+                  <ul className="space-y-3">
                     {onlineUsers.map((u, idx) => (
-                      <li key={`${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-600 dark:text-gray-300">
-                        {u.avatar ? (
-                            <img src={u.avatar} alt={u.username} className="w-6 h-6 rounded-full object-cover border border-gray-300 dark:border-gray-700" />
-                        ) : u.isMobile ? (
-                            <Smartphone size={16} className="text-green-500 drop-shadow-[0_0_5px_rgba(34,197,94,0.5)]" />
-                        ) : (
-                            <div className="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_5px_#22c55e]"></div>
-                        )}
-                        <span className={`truncate ${u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}`}>{u.username}</span>
-                        {u.id === user.id && <span className="text-[10px] text-gray-400 flex-shrink-0">(You)</span>}
+                      <li key={`${u.id}-${idx}`} className="flex items-start space-x-2 text-sm text-gray-600 dark:text-gray-300">
+                        {/* Avatar with Status Overlay */}
+                        <div className="relative flex-shrink-0">
+                            {u.avatar ? (
+                                <img src={u.avatar} alt={u.username} className="w-8 h-8 rounded-full object-cover border border-gray-300 dark:border-gray-700" />
+                            ) : (
+                                <div className="w-8 h-8 rounded-full bg-gray-500 flex items-center justify-center text-[10px] font-bold text-white uppercase border border-gray-300 dark:border-gray-700">
+                                    {u.username.substring(0,2)}
+                                </div>
+                            )}
+                            <div className="absolute -bottom-0.5 -right-0.5 w-3 h-3 rounded-full border-2 border-white dark:border-[#0f1422] flex items-center justify-center bg-green-500">
+                                {u.isMobile && <Smartphone size={8} className="text-white" />}
+                            </div>
+                        </div>
+
+                        <div className="flex flex-col min-w-0 justify-center h-full pt-0.5">
+                            <span className={`truncate leading-none ${u.id === user.id ? "text-gray-900 dark:text-white font-bold" : ""}`}>
+                                {u.username} {u.id === user.id && <span className="text-[10px] font-normal text-gray-400 ml-1">(You)</span>}
+                            </span>
+                            {u.statusMessage && (
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500 truncate">{u.statusMessage}</span>
+                            )}
+                        </div>
                       </li>
                     ))}
                   </ul>
@@ -606,15 +726,25 @@ const App: React.FC = () => {
                     <span className="text-gray-500">Offline</span>
                     <span className="bg-gray-200 dark:bg-gray-800 text-gray-500 px-1.5 rounded-full text-[10px]">{offlineUsers.length}</span>
                   </h2>
-                  <ul className="space-y-2 opacity-60">
+                  <ul className="space-y-3 opacity-60">
                     {offlineUsers.map((u, idx) => (
-                      <li key={`off-${u.id}-${idx}`} className="flex items-center space-x-2 text-sm text-gray-500 dark:text-gray-400">
-                        {u.avatar ? (
-                             <img src={u.avatar} alt={u.username} className="w-6 h-6 rounded-full object-cover grayscale" />
-                        ) : (
-                             <div className="w-2 h-2 rounded-full bg-gray-400 dark:bg-gray-600"></div>
-                        )}
-                        <span className="truncate">{u.username}</span>
+                      <li key={`off-${u.id}-${idx}`} className="flex items-start space-x-2 text-sm text-gray-500 dark:text-gray-400">
+                         {/* Avatar (No Status Overlay) */}
+                         <div className="relative flex-shrink-0">
+                            {u.avatar ? (
+                                <img src={u.avatar} alt={u.username} className="w-8 h-8 rounded-full object-cover grayscale" />
+                            ) : (
+                                <div className="w-8 h-8 rounded-full bg-gray-400 dark:bg-gray-600 flex items-center justify-center text-[10px] font-bold text-white uppercase">
+                                    {u.username.substring(0,2)}
+                                </div>
+                            )}
+                        </div>
+                        <div className="flex flex-col min-w-0 justify-center h-full pt-0.5">
+                            <span className="truncate leading-none">{u.username}</span>
+                            {u.statusMessage && (
+                                <span className="text-[10px] text-gray-400 truncate">{u.statusMessage}</span>
+                            )}
+                        </div>
                       </li>
                     ))}
                   </ul>

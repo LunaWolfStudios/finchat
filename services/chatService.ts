@@ -111,6 +111,16 @@ class ChatService {
     return await res.json();
   }
 
+  async updateChannel(channel: Channel): Promise<Channel> {
+    const res = await fetch(`${CONFIG.API_URL}/channels/${channel.id}`, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: channel.name, order: channel.order })
+    });
+    if (!res.ok) throw new Error("Failed to update channel");
+    return await res.json();
+  }
+
   async getMessages(channelId: string, limit = 200, before?: string): Promise<Message[]> {
     try {
       let url = `${CONFIG.API_URL}/messages?limit=${limit}&channelId=${channelId}`;
