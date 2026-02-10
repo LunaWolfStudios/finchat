@@ -322,8 +322,9 @@ const App: React.FC = () => {
       const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
       const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
 
-      // Show "Jump to Present" if scrolled up > 500px or if we have detached history
-      setShowScrollToBottom(distanceFromBottom > 500 || hasMoreNewer);
+      // Show "Jump to Present" if scrolled up > 2500px or if we have detached history
+      // Threshold increased to 2500px to avoid premature button appearance
+      setShowScrollToBottom(distanceFromBottom > 2500 || hasMoreNewer);
 
       // Scroll Up Trigger
       if (scrollTop < 100 && hasMoreOlder && !isLoading) {
@@ -355,20 +356,32 @@ const App: React.FC = () => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    if (scrollMode.current === 'force-bottom') {
-        // Force bottom (Initial load / Channel switch)
-        // Set a high value to ensure bottom
-        container.scrollTop = container.scrollHeight;
-    } else if (scrollMode.current === 'stick') {
-        // Auto-scroll for new messages (if was at bottom)
-        container.scrollTop = container.scrollHeight;
-    } else if (scrollMode.current === 'prepend') {
-        // Maintain position when loading older
-        const newHeight = container.scrollHeight;
-        const diff = newHeight - prevScrollHeightRef.current;
-        container.scrollTop = diff;
-    } 
-    // 'none' means do nothing, let user scroll
+    const applyScroll = () => {
+        if (scrollMode.current === 'force-bottom') {
+            container.scrollTop = container.scrollHeight;
+        } else if (scrollMode.current === 'stick') {
+            container.scrollTop = container.scrollHeight;
+        } else if (scrollMode.current === 'prepend') {
+            const newHeight = container.scrollHeight;
+            const diff = newHeight - prevScrollHeightRef.current;
+            if (diff > 0) {
+                container.scrollTop = diff;
+            }
+        }
+    };
+
+    applyScroll();
+
+    // Aggressively ensure bottom for initial loads or new messages to account for image loading/layout shifts
+    if (scrollMode.current === 'force-bottom' || scrollMode.current === 'stick') {
+        // Multiple timeouts to catch various loading stages (e.g. slight render delays, image layout calc)
+        const timeouts = [50, 150, 300, 600];
+        timeouts.forEach(t => setTimeout(() => {
+             if (scrollContainerRef.current && (scrollMode.current === 'force-bottom' || scrollMode.current === 'stick')) {
+                  scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+             }
+        }, t));
+    }
     
   }, [messages]);
 
@@ -935,7 +948,7 @@ const App: React.FC = () => {
                <div className="mb-6">
                   <h2 className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-3 flex justify-between">
                     <span className="text-gray-500">Offline</span>
-                    <span className="bg-gray-200 dark:bg-gray-800 text-gray-500 px-1.5 rounded-full text-[10px]">{offlineUsers.length}</span>
+                    <span className="bg-green-200 dark:bg-gray-800 text-gray-500 px-1.5 rounded-full text-[10px]">{offlineUsers.length}</span>
                   </h2>
                   <ul className="space-y-3 opacity-60">
                     {offlineUsers.map((u, idx) => (
