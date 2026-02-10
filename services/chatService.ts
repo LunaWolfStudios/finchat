@@ -151,11 +151,16 @@ class ChatService {
     return await res.json();
   }
 
-  async getMessages(channelId: string, limit = 100, before?: string): Promise<Message[]> {
+  async getMessages(channelId: string, limit = 100, before?: string, after?: string, around?: string): Promise<Message[]> {
     try {
-      let url = `${CONFIG.API_URL}/messages?limit=${limit}&channelId=${channelId}`;
-      if (before) url += `&before=${encodeURIComponent(before)}`;
-      const res = await fetch(url);
+      const params = new URLSearchParams();
+      params.append('limit', limit.toString());
+      params.append('channelId', channelId);
+      if (before) params.append('before', before);
+      if (after) params.append('after', after);
+      if (around) params.append('around', around);
+
+      const res = await fetch(`${CONFIG.API_URL}/messages?${params.toString()}`);
       if (!res.ok) throw new Error('Failed to fetch messages');
       return await res.json();
     } catch (e) {

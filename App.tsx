@@ -57,9 +57,10 @@ const App: React.FC = () => {
   // Notifications
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
 
-  // Pagination
-  const [isLoadingHistory, setIsLoadingHistory] = useState(false);
-  const [hasMoreHistory, setHasMoreHistory] = useState(true);
+  // Pagination & Scrolling
+  const [isLoading, setIsLoading] = useState(false);
+  const [hasMoreOlder, setHasMoreOlder] = useState(true);
+  const [hasMoreNewer, setHasMoreNewer] = useState(false); // True if we are looking at history and there is newer stuff
   const [headerImgError, setHeaderImgError] = useState(false);
 
   // Scroll & Gestures
@@ -67,9 +68,10 @@ const App: React.FC = () => {
   const touchEndX = useRef<number>(0);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const initialLoadDone = useRef(false);
+  
+  // Ref to control scroll behavior during updates
+  const scrollMode = useRef<'auto' | 'prepend' | 'append' | 'jump'>('auto');
   const prevScrollHeightRef = useRef<number>(0);
-  const isPrependRef = useRef<boolean>(false);
 
   // Initialize Notification Permission State
   useEffect(() => {
@@ -154,16 +156,23 @@ const App: React.FC = () => {
     const unsubscribe = chatService.subscribe(
         (newMessage) => {
             if (newMessage.channelId === activeChannelRef.current) {
-                setMessages(prev => [...prev, newMessage]);
+                setMessages(prev => {
+                    // Only append to view if we are already at the bottom OR if the list is empty
+                    // If we are looking at history (hasMoreNewer is true), we might NOT want to append automatically to avoid jumping
+                    // But for V1, appending to state is fine, user just won't see it if they are scrolled up.
+                    return [...prev, newMessage];
+                });
+                
+                // If we receive a new message and we are "detached" (viewing history), 
+                // we technically have more newer messages now, but since we appended it to state,
+                // we actually just need to ensure auto-scroll handles it if we are at bottom.
             } else if (user && newMessage.content.includes(`@${user.username}`)) {
-                 // Mention in another channel
                  setUnreadMentions(prev => ({
                      ...prev,
                      [newMessage.channelId]: (prev[newMessage.channelId] || 0) + 1
                  }));
             }
 
-            // Handle notifications regardless of channel if mentioned
             if (user && newMessage.userId !== user.id && newMessage.content.includes(`@${user.username}`) && notificationsEnabled) {
                 new Notification(`${newMessage.username} in #${channels.find(c=>c.id===newMessage.channelId)?.name || 'unknown'}`, {
                     body: newMessage.content
@@ -209,107 +218,147 @@ const App: React.FC = () => {
         });
     }
 
-    const fetchHistory = async () => {
-      setIsLoadingHistory(true);
-      setMessages([]); // Clear previous channel messages immediately
-      setHasMoreHistory(true);
+    const fetchInitialHistory = async () => {
+      setIsLoading(true);
+      setMessages([]); 
+      setHasMoreOlder(true);
+      setHasMoreNewer(false);
       
-      const limit = 100; // Load 100 messages initially
+      const limit = 50; 
       const history = await chatService.getMessages(activeChannelId, limit);
       setMessages(history);
       
       if (history.length < limit) {
-        setHasMoreHistory(false);
+        setHasMoreOlder(false);
       }
 
-      setIsLoadingHistory(false);
-      initialLoadDone.current = true;
-      isPrependRef.current = false;
-      
-      // Scroll to bottom
-      setTimeout(() => {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'auto' });
-      }, 50);
+      setIsLoading(false);
+      scrollMode.current = 'auto'; // Force scroll to bottom on initial load
     };
 
     if (activeChannelId) {
-        fetchHistory();
-        setTypingUsers(new Map()); // Clear typing on channel switch
+        fetchInitialHistory();
+        setTypingUsers(new Map()); 
     }
   }, [activeChannelId]);
 
-  // Update Known Users (Persistent offline list & Avatars)
+  // Update Known Users
   useEffect(() => {
      setKnownUsers(prev => {
          const next = new Map(prev);
          let changed = false;
-         
-         // Add from messages
          messages.forEach(m => {
-             const existing = next.get(m.userId);
-             if (!existing) {
+             if (!next.has(m.userId)) {
                  next.set(m.userId, { id: m.userId, username: m.username });
                  changed = true;
              }
          });
-         
-         // Add from online users
          onlineUsers.forEach(u => {
              const existing = next.get(u.id);
-             // Update if new info (avatar/status)
              if (!existing || existing.avatar !== u.avatar || existing.username !== u.username || existing.statusMessage !== u.statusMessage) {
                  next.set(u.id, u);
                  changed = true;
              }
          });
-         
          return changed ? next : prev;
      });
   }, [messages, onlineUsers]);
 
+  // --- Infinite Scroll Handlers ---
 
-  // Handle Scrolling Logic
-  useLayoutEffect(() => {
-      // If we are prepending messages (loading history), maintain scroll position
-      if (isPrependRef.current && scrollContainerRef.current) {
-          const newScrollHeight = scrollContainerRef.current.scrollHeight;
-          const diff = newScrollHeight - prevScrollHeightRef.current;
-          scrollContainerRef.current.scrollTop = diff;
-          isPrependRef.current = false;
-      } 
-      // Otherwise, if it's the initial load or a new message came in (and not a prepend)
-      else if (initialLoadDone.current && !isPrependRef.current) {
-          // Check if we should scroll to bottom? 
-          // For simplicity, we auto-scroll on new messages for now
-          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  const loadMoreOlder = useCallback(async () => {
+    if (isLoading || !hasMoreOlder || messages.length === 0) return;
+    
+    setIsLoading(true);
+    scrollMode.current = 'prepend';
+    if (scrollContainerRef.current) prevScrollHeightRef.current = scrollContainerRef.current.scrollHeight;
+
+    const oldest = messages[0];
+    const older = await chatService.getMessages(activeChannelId, 50, oldest.timestamp);
+    
+    if (older.length > 0) {
+        setMessages(prev => [...older, ...prev]);
+        if (older.length < 50) setHasMoreOlder(false);
+    } else {
+        setHasMoreOlder(false);
+    }
+    setIsLoading(false);
+  }, [isLoading, hasMoreOlder, messages, activeChannelId]);
+
+  const loadMoreNewer = useCallback(async () => {
+    if (isLoading || !hasMoreNewer || messages.length === 0) return;
+
+    setIsLoading(true);
+    scrollMode.current = 'append'; // We want to just add them, let user scroll down naturally
+    
+    const newest = messages[messages.length - 1];
+    const newer = await chatService.getMessages(activeChannelId, 50, undefined, newest.timestamp);
+
+    if (newer.length > 0) {
+        setMessages(prev => [...prev, ...newer]);
+        // If we got less than requested, we likely hit the end
+        if (newer.length < 50) setHasMoreNewer(false); 
+    } else {
+        setHasMoreNewer(false);
+    }
+    setIsLoading(false);
+  }, [isLoading, hasMoreNewer, messages, activeChannelId]);
+
+  const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
+      const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+
+      // Scroll Up Trigger
+      if (scrollTop < 100 && hasMoreOlder && !isLoading) {
+          loadMoreOlder();
       }
+
+      // Scroll Down Trigger (only if we are detached from bottom)
+      if (scrollHeight - scrollTop - clientHeight < 100 && hasMoreNewer && !isLoading) {
+          loadMoreNewer();
+      }
+  }, [hasMoreOlder, hasMoreNewer, isLoading, loadMoreOlder, loadMoreNewer]);
+
+  // --- Scroll Layout Effect ---
+  useLayoutEffect(() => {
+    const container = scrollContainerRef.current;
+    if (!container) return;
+
+    if (scrollMode.current === 'auto') {
+        // Initial load or channel switch - Force bottom
+        // We set scrollTop to a huge number to guarantee bottom even if images aren't loaded
+        container.scrollTop = container.scrollHeight;
+    } else if (scrollMode.current === 'prepend') {
+        // Maintain position when loading older
+        const newHeight = container.scrollHeight;
+        const diff = newHeight - prevScrollHeightRef.current;
+        container.scrollTop = diff;
+    } else if (scrollMode.current === 'jump') {
+         // Handled in jump function mostly, but we can refine here if needed
+    } 
+    // For 'append' (scrolling down), normal browser behavior works usually
+    
+    // Reset mode if it was specific
+    if (scrollMode.current !== 'auto') {
+        // scrollMode.current = 'auto'; // Keep it distinct? No, default back to auto behavior for new messages
+    }
   }, [messages]);
 
-  const loadOlderMessages = async () => {
-    if (messages.length === 0 || isLoadingHistory) return;
-    
-    // Capture scroll height before update
-    if (scrollContainerRef.current) {
-        prevScrollHeightRef.current = scrollContainerRef.current.scrollHeight;
-        isPrependRef.current = true;
-    }
-
-    setIsLoadingHistory(true);
-    const oldestTimestamp = messages[0].timestamp;
-    const limit = 100; // Load 100 older messages
-    
-    const olderMessages = await chatService.getMessages(activeChannelId, limit, oldestTimestamp);
-    
-    if (olderMessages.length > 0) {
-      setMessages(prev => [...olderMessages, ...prev]);
-      if (olderMessages.length < limit) {
-        setHasMoreHistory(false);
+  // Special effect for new incoming real-time messages when at bottom
+  useEffect(() => {
+      const container = scrollContainerRef.current;
+      if (!container) return;
+      
+      // If we are already near bottom (and not fetching history), auto-scroll
+      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
+      
+      if (isNearBottom && !hasMoreNewer) {
+          // Use timeout to allow layout to settle (images etc)
+          setTimeout(() => {
+             container.scrollTop = container.scrollHeight;
+          }, 50);
       }
-    } else {
-      setHasMoreHistory(false);
-    }
-    setIsLoadingHistory(false);
-  };
+  }, [messages, hasMoreNewer]);
+
 
   const createNewChannel = async () => {
     if (!newChannelName.trim()) return;
@@ -463,6 +512,23 @@ const App: React.FC = () => {
         file: file 
       });
       setReplyTo(null);
+      
+      // If we are looking at old history, jump to bottom on send
+      if (hasMoreNewer) {
+          setHasMoreNewer(false);
+          setMessages(prev => {
+              // We could fetch latest here, but socket will deliver it. 
+              // We just need to make sure we aren't "detached" anymore.
+              // For simplicity, let's re-fetch latest context
+              chatService.getMessages(activeChannelId, 50).then(msgs => {
+                  setMessages(msgs);
+                  scrollMode.current = 'auto';
+                  if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
+              });
+              return prev;
+          });
+      }
+
     } catch (e) {
       alert("Failed to send message. Check server connection.");
     }
@@ -478,6 +544,7 @@ const App: React.FC = () => {
     if (msg) chatService.deleteMessage(msg);
   };
 
+  // Improved Jump Logic with Context
   const handleJumpToMessage = async (msgOrId: Message | string) => {
       let targetId: string;
       let channelIdOfMsg: string = activeChannelId;
@@ -495,18 +562,41 @@ const App: React.FC = () => {
       setIsPinnedOpen(false);
 
       if (channelIdOfMsg !== activeChannelId) {
-          // Switch Channel first
           setActiveChannelId(channelIdOfMsg);
-          // Wait briefly for channel switch effect to fire and load messages
-          await new Promise(r => setTimeout(r, 600)); 
+          // Wait briefly? Actually, we can just load context directly below
       }
 
+      // Check if message is already in view
       const element = document.getElementById(`msg-${targetId}`);
       if (element) {
         element.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        element.classList.add('bg-neon-purple/20', 'transition-colors', 'duration-1000');
-        setTimeout(() => element.classList.remove('bg-neon-purple/20'), 1000);
+        highlightMessage(element);
+        return;
       }
+
+      // Not in view, load context
+      setIsLoading(true);
+      const limit = 50;
+      const contextMessages = await chatService.getMessages(channelIdOfMsg, limit, undefined, undefined, targetId);
+      
+      setMessages(contextMessages);
+      setHasMoreOlder(true); // Assume there's more history
+      setHasMoreNewer(true); // Assume there's newer messages since we jumped to specific one
+      
+      // After render, scroll to it
+      setTimeout(() => {
+          const el = document.getElementById(`msg-${targetId}`);
+          if (el) {
+              el.scrollIntoView({ behavior: 'auto', block: 'center' });
+              highlightMessage(el);
+          }
+          setIsLoading(false);
+      }, 100);
+  };
+
+  const highlightMessage = (element: HTMLElement) => {
+      element.classList.add('bg-neon-purple/20', 'transition-colors', 'duration-1000');
+      setTimeout(() => element.classList.remove('bg-neon-purple/20'), 1000);
   };
 
   const handleTyping = (isTyping: boolean) => {
@@ -893,22 +983,10 @@ const App: React.FC = () => {
 
           <div 
             ref={scrollContainerRef}
+            onScroll={handleScroll}
             className="flex-1 overflow-y-auto p-4 md:p-6 space-y-2 custom-scrollbar bg-gray-100 dark:bg-transparent"
           >
-             {/* Load Older Button */}
-             {hasMoreHistory && (
-               <div className="flex justify-center mb-4">
-                 <button 
-                    onClick={loadOlderMessages} 
-                    disabled={isLoadingHistory}
-                    className="flex items-center px-4 py-2 bg-white dark:bg-gray-800 rounded-full text-xs text-cyan-700 dark:text-neon-cyan hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors disabled:opacity-50 shadow-sm"
-                 >
-                   {isLoadingHistory ? 'Loading...' : 'Show Older Messages'} <ArrowUp size={12} className="ml-1"/>
-                 </button>
-               </div>
-             )}
-
-             {messages.length === 0 && !isLoadingHistory ? (
+             {messages.length === 0 && !isLoading ? (
                <div className="h-full flex flex-col items-center justify-center text-gray-500 opacity-50">
                  <div className="w-20 h-20 rounded-full border-2 border-dashed border-gray-400 dark:border-gray-600 flex items-center justify-center mb-4">
                    <Hash size={40} />
@@ -917,25 +995,39 @@ const App: React.FC = () => {
                  <p className="text-xs mt-1">Be the first to say something!</p>
                </div>
              ) : (
-               messages.map((msg, index) => {
-                 const isOwn = msg.userId === user.id;
-                 const authorUser = knownUsers.get(msg.userId);
-                 return (
-                   <MessageBubble 
-                     key={msg.id}
-                     message={msg}
-                     isOwnMessage={isOwn}
-                     onReply={setReplyTo}
-                     onEdit={handleEditMessage}
-                     onDelete={handleDeleteMessage}
-                     scrollToMessage={(id) => handleJumpToMessage(id)}
-                     currentUser={user}
-                     getReplySnippet={getReplySnippet}
-                     authorUser={authorUser}
-                     knownUsers={knownUsers}
-                   />
-                 );
-               })
+               <>
+                 {hasMoreOlder && (
+                    <div className="h-8 flex items-center justify-center text-xs text-gray-500">
+                       {isLoading ? "Loading history..." : "Scroll for more"}
+                    </div>
+                 )}
+                 
+                 {messages.map((msg, index) => {
+                   const isOwn = msg.userId === user.id;
+                   const authorUser = knownUsers.get(msg.userId);
+                   return (
+                     <MessageBubble 
+                       key={msg.id}
+                       message={msg}
+                       isOwnMessage={isOwn}
+                       onReply={setReplyTo}
+                       onEdit={handleEditMessage}
+                       onDelete={handleDeleteMessage}
+                       scrollToMessage={(id) => handleJumpToMessage(id)}
+                       currentUser={user}
+                       getReplySnippet={getReplySnippet}
+                       authorUser={authorUser}
+                       knownUsers={knownUsers}
+                     />
+                   );
+                 })}
+
+                 {hasMoreNewer && (
+                    <div className="h-8 flex items-center justify-center text-xs text-gray-500">
+                       {isLoading ? "Loading newer messages..." : "Scroll down for new messages"}
+                    </div>
+                 )}
+               </>
              )}
              <div ref={messagesEndRef} />
           </div>

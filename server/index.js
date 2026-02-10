@@ -202,12 +202,14 @@ app.put('/channels/:id', (req, res) => {
 // Get Messages (Filtered by Channel & Search)
 app.get('/messages', (req, res) => {
   let allMessages = getMessages();
-  const limit = parseInt(req.query.limit) || 100; // Default to 100 as requested
-  const before = req.query.before;
+  const limit = parseInt(req.query.limit) || 100;
+  const before = req.query.before; // timestamp
+  const after = req.query.after;   // timestamp
+  const around = req.query.around; // messageId
   const channelId = req.query.channelId;
   const query = req.query.q ? req.query.q.toLowerCase() : null;
 
-  // 1. Filter by Channel (if specified)
+  // 1. Filter by Channel
   if (channelId && channelId !== 'all') {
     allMessages = allMessages.filter(m => m.channelId === channelId);
   }
@@ -220,15 +222,38 @@ app.get('/messages', (req, res) => {
     );
   }
 
-  // 3. Filter by Pagination (Timestamp)
-  if (before) {
-    allMessages = allMessages.filter(m => m.timestamp < before);
-  }
+  let result = [];
 
-  // 4. Sort & Limit
-  const slice = allMessages.slice(-limit);
+  // 3. Pagination Strategy
+  if (around) {
+    // Contextual Jump
+    const index = allMessages.findIndex(m => m.id === around);
+    if (index === -1) {
+      // Message not found, fallback to latest
+      result = allMessages.slice(-limit);
+    } else {
+      // Get context around message
+      const half = Math.floor(limit / 2);
+      const start = Math.max(0, index - half);
+      const end = Math.min(allMessages.length, index + half + 1);
+      result = allMessages.slice(start, end);
+    }
+  } else if (before) {
+    // Scrolling Up (History)
+    // Filter messages STRICTLY older than 'before'
+    const older = allMessages.filter(m => m.timestamp < before);
+    result = older.slice(-limit);
+  } else if (after) {
+    // Scrolling Down (Newer)
+    // Filter messages STRICTLY newer than 'after'
+    const newer = allMessages.filter(m => m.timestamp > after);
+    result = newer.slice(0, limit);
+  } else {
+    // Default: Latest messages
+    result = allMessages.slice(-limit);
+  }
   
-  res.json(slice);
+  res.json(result);
 });
 
 app.post('/upload', upload.single('file'), (req, res) => {
