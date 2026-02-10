@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback, useLayoutEffect } from 'react';
 import { Message, User, MessageType, Channel } from './types';
 import { chatService, generateUUID, TypingEvent } from './services/chatService';
 import { APP_NAME } from './constants';
@@ -62,13 +62,14 @@ const App: React.FC = () => {
   const [hasMoreHistory, setHasMoreHistory] = useState(true);
   const [headerImgError, setHeaderImgError] = useState(false);
 
-  // Swipe Gestures
+  // Scroll & Gestures
   const touchStartX = useRef<number>(0);
   const touchEndX = useRef<number>(0);
-
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   const initialLoadDone = useRef(false);
+  const prevScrollHeightRef = useRef<number>(0);
+  const isPrependRef = useRef<boolean>(false);
 
   // Initialize Notification Permission State
   useEffect(() => {
@@ -223,6 +224,7 @@ const App: React.FC = () => {
 
       setIsLoadingHistory(false);
       initialLoadDone.current = true;
+      isPrependRef.current = false;
       
       // Scroll to bottom
       setTimeout(() => {
@@ -266,16 +268,32 @@ const App: React.FC = () => {
   }, [messages, onlineUsers]);
 
 
-  // Auto-scroll
-  useEffect(() => {
-    if (initialLoadDone.current) {
-        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-    }
-  }, [messages.length]);
+  // Handle Scrolling Logic
+  useLayoutEffect(() => {
+      // If we are prepending messages (loading history), maintain scroll position
+      if (isPrependRef.current && scrollContainerRef.current) {
+          const newScrollHeight = scrollContainerRef.current.scrollHeight;
+          const diff = newScrollHeight - prevScrollHeightRef.current;
+          scrollContainerRef.current.scrollTop = diff;
+          isPrependRef.current = false;
+      } 
+      // Otherwise, if it's the initial load or a new message came in (and not a prepend)
+      else if (initialLoadDone.current && !isPrependRef.current) {
+          // Check if we should scroll to bottom? 
+          // For simplicity, we auto-scroll on new messages for now
+          messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+      }
+  }, [messages]);
 
   const loadOlderMessages = async () => {
     if (messages.length === 0 || isLoadingHistory) return;
     
+    // Capture scroll height before update
+    if (scrollContainerRef.current) {
+        prevScrollHeightRef.current = scrollContainerRef.current.scrollHeight;
+        isPrependRef.current = true;
+    }
+
     setIsLoadingHistory(true);
     const oldestTimestamp = messages[0].timestamp;
     const limit = 100; // Load 100 older messages

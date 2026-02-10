@@ -163,13 +163,14 @@ class ChatService {
     }
   }
 
-  async searchMessages(filters: SearchFilters): Promise<Message[]> {
+  async searchMessages(filters: SearchFilters, limit = 100, before?: string): Promise<Message[]> {
      try {
        const params = new URLSearchParams();
        if (filters.query) params.append('q', filters.query);
        if (filters.channelId) params.append('channelId', filters.channelId);
+       if (before) params.append('before', before);
        
-       const res = await fetch(`${CONFIG.API_URL}/messages?${params.toString()}&limit=100`);
+       const res = await fetch(`${CONFIG.API_URL}/messages?${params.toString()}&limit=${limit}`);
        if (!res.ok) throw new Error('Search failed');
        return await res.json();
      } catch(e) {

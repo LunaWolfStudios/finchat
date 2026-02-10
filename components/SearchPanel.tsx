@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { Search, X, User, Link as LinkIcon, MessageSquare, ArrowRight, Calendar, Layers } from 'lucide-react';
+import { Search, X, User, Link as LinkIcon, MessageSquare, ArrowRight, Calendar, Layers, ArrowDown } from 'lucide-react';
 import { Message, MessageType, Channel } from '../types';
 import { chatService } from '../services/chatService';
 
@@ -21,31 +21,38 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
   
   const [results, setResults] = useState<Message[]>([]);
   const [isSearching, setIsSearching] = useState(false);
+  const [hasMore, setHasMore] = useState(false);
 
-  // Debounce search execution
-  useEffect(() => {
-    // If no filters are active, show nothing
-    if (!query && !author && !startDate && !endDate && typeFilter === 'all' && channelFilter === activeChannelId) {
-      setResults([]);
-      return;
-    }
+  const performSearch = async (append: boolean = false) => {
+    setIsSearching(true);
+    try {
+        const limit = 100;
+        let before: string | undefined = undefined;
 
-    const timer = setTimeout(async () => {
-      setIsSearching(true);
-      try {
+        if (append && results.length > 0) {
+            // Get oldest timestamp from current results (which are Newest->Oldest)
+            before = results[results.length - 1].timestamp;
+        }
+
         // Fetch from Server
         const searchResults = await chatService.searchMessages({
           query,
           username: author || undefined,
-          date: startDate || undefined, // Simple date pass, refined below
+          date: startDate || undefined, 
           type: typeFilter === 'all' ? undefined : typeFilter,
           channelId: channelFilter
-        });
+        }, limit, before);
 
-        // Additional client-side filtering for Author/Date/Type 
-        // (Since server currently primarily handles 'q' and 'channelId')
+        if (searchResults.length < limit) {
+            setHasMore(false);
+        } else {
+            setHasMore(true);
+        }
+
+        // Client-side filtering for fields not fully handled by backend (like exact author, type, date range)
+        // Note: This might reduce the page size below 100, triggering a "small page" look.
+        // Ideally backend does all filtering. For V1 we accept this limitation.
         const refined = searchResults.filter(msg => {
-           // Exclude deleted messages
            if (msg.deleted) return false;
 
            let matches = true;
@@ -65,13 +72,34 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
            return matches;
         });
 
-        setResults(refined.reverse()); // Newest first
-      } catch (e) {
+        // Backend returns Oldest->Newest. We want Newest->Oldest for search results list.
+        const reversedNewResults = refined.reverse();
+
+        if (append) {
+            setResults(prev => [...prev, ...reversedNewResults]);
+        } else {
+            setResults(reversedNewResults);
+        }
+
+    } catch (e) {
         console.error("Search error", e);
-      } finally {
+    } finally {
         setIsSearching(false);
-      }
-    }, 500); // 500ms debounce
+    }
+  };
+
+  // Debounce initial search execution
+  useEffect(() => {
+    // If no filters are active, show nothing
+    if (!query && !author && !startDate && !endDate && typeFilter === 'all' && channelFilter === activeChannelId) {
+      setResults([]);
+      setHasMore(false);
+      return;
+    }
+
+    const timer = setTimeout(() => {
+        performSearch(false);
+    }, 500);
 
     return () => clearTimeout(timer);
   }, [query, author, startDate, endDate, typeFilter, channelFilter]);
@@ -188,7 +216,7 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
       {/* Results List */}
       <div className="flex-1 overflow-y-auto p-4 space-y-3 custom-scrollbar">
         <div className="text-xs font-bold text-gray-500 uppercase tracking-wider mb-2 flex justify-between">
-          <span>{isSearching ? 'Searching...' : `${results.length} Matches`}</span>
+          <span>{isSearching ? 'Searching...' : `${results.length} Loaded`}</span>
           {(query || author || startDate || endDate || typeFilter !== 'all' || channelFilter !== activeChannelId) && (
               <button 
                 onClick={() => { setQuery(''); setAuthor(''); setStartDate(''); setEndDate(''); setTypeFilter('all'); setChannelFilter(activeChannelId); }}
@@ -229,6 +257,16 @@ export const SearchPanel: React.FC<SearchPanelProps> = ({ isOpen, onClose, activ
               </div>
             </div>
           ))
+        )}
+
+        {hasMore && (
+            <button 
+                onClick={() => performSearch(true)}
+                disabled={isSearching}
+                className="w-full py-2 mt-4 text-xs font-bold text-gray-500 bg-gray-100 dark:bg-gray-800 rounded hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors flex items-center justify-center"
+            >
+                {isSearching ? 'Loading...' : 'Load More Results'} <ArrowDown size={12} className="ml-1"/>
+            </button>
         )}
       </div>
     </div>
