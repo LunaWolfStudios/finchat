@@ -9,7 +9,7 @@ import { LoginModal } from './components/LoginModal';
 import { SearchPanel } from './components/SearchPanel';
 import { PinnedPanel } from './components/PinnedPanel';
 import { SettingsModal } from './components/SettingsModal';
-import { Search, Fish, Users, Activity, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, ChevronRight, Smartphone, Settings } from 'lucide-react';
+import { Search, Fish, Wifi, WifiOff, Edit2, Check, X, Menu, Bell, BellOff, ArrowUp, Pin, Hash, Plus, Smartphone, Settings, ArrowDown } from 'lucide-react';
 
 // Use a specific key for the session ID to avoid confusion with the old object storage
 const STORAGE_KEY_SESSION_ID = 'finchat_session_id';
@@ -62,6 +62,7 @@ const App: React.FC = () => {
   const [hasMoreOlder, setHasMoreOlder] = useState(true);
   const [hasMoreNewer, setHasMoreNewer] = useState(false); // True if we are looking at history and there is newer stuff
   const [headerImgError, setHeaderImgError] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
 
   // Scroll & Gestures
   const touchStartX = useRef<number>(0);
@@ -70,7 +71,11 @@ const App: React.FC = () => {
   const scrollContainerRef = useRef<HTMLDivElement>(null);
   
   // Ref to control scroll behavior during updates
-  const scrollMode = useRef<'auto' | 'prepend' | 'append' | 'jump'>('auto');
+  // 'force-bottom': Force scroll to bottom (load/channel switch)
+  // 'stick': Auto-scroll to bottom if user was already at bottom
+  // 'prepend': Maintain scroll position when adding items to top
+  // 'none': Do not touch scroll (user scrolling up)
+  const scrollMode = useRef<'force-bottom' | 'stick' | 'prepend' | 'none'>('force-bottom');
   const prevScrollHeightRef = useRef<number>(0);
 
   // Initialize Notification Permission State
@@ -156,16 +161,25 @@ const App: React.FC = () => {
     const unsubscribe = chatService.subscribe(
         (newMessage) => {
             if (newMessage.channelId === activeChannelRef.current) {
+                // Determine if we should auto-scroll BEFORE updating state
+                const container = scrollContainerRef.current;
+                if (container) {
+                    const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+                    // If user is near bottom (within 150px), stick to bottom
+                    if (distanceFromBottom < 150) {
+                        scrollMode.current = 'stick';
+                    } else {
+                        scrollMode.current = 'none';
+                    }
+                }
+
                 setMessages(prev => {
                     // Only append to view if we are already at the bottom OR if the list is empty
                     // If we are looking at history (hasMoreNewer is true), we might NOT want to append automatically to avoid jumping
-                    // But for V1, appending to state is fine, user just won't see it if they are scrolled up.
+                    // But for V1, appending to state is fine, user just won't see it if they are scrolled up (scrollMode = none)
                     return [...prev, newMessage];
                 });
                 
-                // If we receive a new message and we are "detached" (viewing history), 
-                // we technically have more newer messages now, but since we appended it to state,
-                // we actually just need to ensure auto-scroll handles it if we are at bottom.
             } else if (user && newMessage.content.includes(`@${user.username}`)) {
                  setUnreadMentions(prev => ({
                      ...prev,
@@ -208,6 +222,24 @@ const App: React.FC = () => {
 
 
   // --- Channel Switching & History ---
+  const fetchInitialHistory = useCallback(async (channelId: string) => {
+      setIsLoading(true);
+      setMessages([]); 
+      setHasMoreOlder(true);
+      setHasMoreNewer(false);
+      
+      const limit = 50; 
+      const history = await chatService.getMessages(channelId, limit);
+      setMessages(history);
+      
+      if (history.length < limit) {
+        setHasMoreOlder(false);
+      }
+
+      setIsLoading(false);
+      scrollMode.current = 'force-bottom'; // Force scroll to bottom on initial load
+  }, []);
+
   useEffect(() => {
     // Clear unread mentions for this channel
     if (unreadMentions[activeChannelId]) {
@@ -218,29 +250,11 @@ const App: React.FC = () => {
         });
     }
 
-    const fetchInitialHistory = async () => {
-      setIsLoading(true);
-      setMessages([]); 
-      setHasMoreOlder(true);
-      setHasMoreNewer(false);
-      
-      const limit = 50; 
-      const history = await chatService.getMessages(activeChannelId, limit);
-      setMessages(history);
-      
-      if (history.length < limit) {
-        setHasMoreOlder(false);
-      }
-
-      setIsLoading(false);
-      scrollMode.current = 'auto'; // Force scroll to bottom on initial load
-    };
-
     if (activeChannelId) {
-        fetchInitialHistory();
+        fetchInitialHistory(activeChannelId);
         setTypingUsers(new Map()); 
     }
-  }, [activeChannelId]);
+  }, [activeChannelId, fetchInitialHistory]);
 
   // Update Known Users
   useEffect(() => {
@@ -289,7 +303,7 @@ const App: React.FC = () => {
     if (isLoading || !hasMoreNewer || messages.length === 0) return;
 
     setIsLoading(true);
-    scrollMode.current = 'append'; // We want to just add them, let user scroll down naturally
+    scrollMode.current = 'none'; // User is scrolling down, let them drive, just append data
     
     const newest = messages[messages.length - 1];
     const newer = await chatService.getMessages(activeChannelId, 50, undefined, newest.timestamp);
@@ -306,6 +320,10 @@ const App: React.FC = () => {
 
   const handleScroll = useCallback((e: React.UIEvent<HTMLDivElement>) => {
       const { scrollTop, scrollHeight, clientHeight } = e.currentTarget;
+      const distanceFromBottom = scrollHeight - scrollTop - clientHeight;
+
+      // Show "Jump to Present" if scrolled up > 500px or if we have detached history
+      setShowScrollToBottom(distanceFromBottom > 500 || hasMoreNewer);
 
       // Scroll Up Trigger
       if (scrollTop < 100 && hasMoreOlder && !isLoading) {
@@ -313,51 +331,46 @@ const App: React.FC = () => {
       }
 
       // Scroll Down Trigger (only if we are detached from bottom)
-      if (scrollHeight - scrollTop - clientHeight < 100 && hasMoreNewer && !isLoading) {
+      if (distanceFromBottom < 100 && hasMoreNewer && !isLoading) {
           loadMoreNewer();
       }
   }, [hasMoreOlder, hasMoreNewer, isLoading, loadMoreOlder, loadMoreNewer]);
+
+  // Jump to Present Handler
+  const handleJumpToPresent = async () => {
+      if (hasMoreNewer) {
+          // If we are detached, just re-fetch the latest history to ensure we are sync'd
+          fetchInitialHistory(activeChannelId);
+      } else {
+          // Just scroll to bottom
+          if (scrollContainerRef.current) {
+              scrollContainerRef.current.scrollTo({ top: scrollContainerRef.current.scrollHeight, behavior: 'smooth' });
+          }
+      }
+      setShowScrollToBottom(false);
+  };
 
   // --- Scroll Layout Effect ---
   useLayoutEffect(() => {
     const container = scrollContainerRef.current;
     if (!container) return;
 
-    if (scrollMode.current === 'auto') {
-        // Initial load or channel switch - Force bottom
-        // We set scrollTop to a huge number to guarantee bottom even if images aren't loaded
+    if (scrollMode.current === 'force-bottom') {
+        // Force bottom (Initial load / Channel switch)
+        // Set a high value to ensure bottom
+        container.scrollTop = container.scrollHeight;
+    } else if (scrollMode.current === 'stick') {
+        // Auto-scroll for new messages (if was at bottom)
         container.scrollTop = container.scrollHeight;
     } else if (scrollMode.current === 'prepend') {
         // Maintain position when loading older
         const newHeight = container.scrollHeight;
         const diff = newHeight - prevScrollHeightRef.current;
         container.scrollTop = diff;
-    } else if (scrollMode.current === 'jump') {
-         // Handled in jump function mostly, but we can refine here if needed
     } 
-    // For 'append' (scrolling down), normal browser behavior works usually
+    // 'none' means do nothing, let user scroll
     
-    // Reset mode if it was specific
-    if (scrollMode.current !== 'auto') {
-        // scrollMode.current = 'auto'; // Keep it distinct? No, default back to auto behavior for new messages
-    }
   }, [messages]);
-
-  // Special effect for new incoming real-time messages when at bottom
-  useEffect(() => {
-      const container = scrollContainerRef.current;
-      if (!container) return;
-      
-      // If we are already near bottom (and not fetching history), auto-scroll
-      const isNearBottom = container.scrollHeight - container.scrollTop - container.clientHeight < 150;
-      
-      if (isNearBottom && !hasMoreNewer) {
-          // Use timeout to allow layout to settle (images etc)
-          setTimeout(() => {
-             container.scrollTop = container.scrollHeight;
-          }, 50);
-      }
-  }, [messages, hasMoreNewer]);
 
 
   const createNewChannel = async () => {
@@ -515,18 +528,10 @@ const App: React.FC = () => {
       
       // If we are looking at old history, jump to bottom on send
       if (hasMoreNewer) {
-          setHasMoreNewer(false);
-          setMessages(prev => {
-              // We could fetch latest here, but socket will deliver it. 
-              // We just need to make sure we aren't "detached" anymore.
-              // For simplicity, let's re-fetch latest context
-              chatService.getMessages(activeChannelId, 50).then(msgs => {
-                  setMessages(msgs);
-                  scrollMode.current = 'auto';
-                  if (scrollContainerRef.current) scrollContainerRef.current.scrollTop = scrollContainerRef.current.scrollHeight;
-              });
-              return prev;
-          });
+          fetchInitialHistory(activeChannelId);
+      } else {
+          // We are at bottom, auto-scroll will be handled by 'stick' in subscriber
+          scrollMode.current = 'stick';
       }
 
     } catch (e) {
@@ -582,6 +587,7 @@ const App: React.FC = () => {
       setMessages(contextMessages);
       setHasMoreOlder(true); // Assume there's more history
       setHasMoreNewer(true); // Assume there's newer messages since we jumped to specific one
+      scrollMode.current = 'none'; // Don't auto scroll, we will manual scroll
       
       // After render, scroll to it
       setTimeout(() => {
@@ -1033,6 +1039,20 @@ const App: React.FC = () => {
           </div>
 
           <div className="flex-none pb-safe bg-white dark:bg-gray-900 relative">
+            
+            {/* Jump To Present Button */}
+            {showScrollToBottom && (
+                <div className="absolute bottom-full mb-8 left-1/2 transform -translate-x-1/2 z-20">
+                     <button 
+                        onClick={handleJumpToPresent}
+                        className="flex items-center space-x-2 bg-neon-cyan/90 text-black px-4 py-2 rounded-full font-bold shadow-[0_0_15px_rgba(0,255,255,0.4)] animate-bounce hover:bg-white transition-colors"
+                     >
+                         <ArrowDown size={16} />
+                         <span className="text-xs uppercase tracking-wider">Jump to Present</span>
+                     </button>
+                </div>
+            )}
+
             {/* Typing Indicator Banner */}
             {typingUserNames.length > 0 && (
                 <div className="absolute bottom-full left-0 w-full px-4 py-1 text-xs text-gray-500 dark:text-gray-400 bg-gradient-to-t from-white via-white to-transparent dark:from-gray-900 dark:via-gray-900 dark:to-transparent pointer-events-none animate-pulse">
