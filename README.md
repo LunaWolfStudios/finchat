@@ -1,6 +1,7 @@
 # Setup
 
 To test on localhost checkout the `localhost` branch.
+
 When ready to host on your own secure web server checkout the `main` branch.
 
 **Prerequisites:** 
@@ -105,7 +106,7 @@ Add a new server block listening on 443
         ssl_protocols TLSv1.2 TLSv1.3;
         ssl_prefer_server_ciphers on;
 
-        # --- IP WHITELIST ---
+        # IP WHITELIST (STRONGLY RECOMMENDED ONCE SETUP IS COMPLETE)
         #allow XXX.XXX.XXX.X;   # replace with your IP
 		#allow XXX.XXX.XXX.X;   # add additional whitelisting as needed
         #deny all;
