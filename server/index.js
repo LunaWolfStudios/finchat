@@ -260,8 +260,7 @@ app.post('/upload', upload.single('file'), (req, res) => {
   if (!req.file) {
     return res.status(400).send('No file uploaded.');
   }
-  const protocol = req.headers['x-forwarded-proto'] || req.protocol;
-  const fileUrl = `${protocol}://${req.get('host')}/uploads/${req.file.filename}`;
+  const fileUrl = `${req.protocol}://${req.get('host')}/uploads/${req.file.filename}`;
   res.json({ url: fileUrl, filename: req.file.filename });
 });
 
