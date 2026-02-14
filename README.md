@@ -195,6 +195,7 @@ Try out your secure self hosted chat app via `https://myapp.mydomain.com`
 
 All messages, users, and media files will be saved on your server at `path/to/finchat/data/`
 
+**IMPORTANT** once you've verified the app is working, secure your network by whitelisting IPs in the server block and denying all others.
 
 ## Disclaimer
 This application was created with the assistance of [Google AI Studio](https://aistudio.google.com/). The developer makes no guarantees regarding reliability for any particular purpose and assumes no responsibility for any outcomes resulting from its use.
