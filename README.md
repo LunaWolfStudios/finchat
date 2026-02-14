@@ -1,3 +1,17 @@
+# Screenshots
+
+<p align="center">
+  <img src="screenshots/finchat-desktop.jpg" width="600" />
+</p>
+
+<p align="center">
+  <img src="screenshots/finchat-mobile.jpg" width="200" />
+  <img src="screenshots/finchat-mobile-light-theme.jpg" width="200" />
+  <img src="screenshots/finchat-mobile-channels.jpg" width="200" />
+  <img src="screenshots/finchat-mobile-search-filters.jpg" width="200" />
+</p>
+
+
 # Setup
 
 To test on localhost checkout the `localhost` branch.
@@ -49,7 +63,7 @@ server {
 }
 ```
 
-Start your nginx server by navigating to the install folder and running `start nginx`
+Start your nginx server by navigating to the install folder and running `start nginx` with administrator privileges.
 
 As you make changes to your nginx.conf you can use `nginx -s reload` to reload the config instantly.
 
